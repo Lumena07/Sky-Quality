@@ -1,0 +1,547 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SYSTEM_ADMIN
+  QUALITY_MANAGER
+  AUDITOR
+  DEPARTMENT_HEAD
+  STAFF
+  FOCAL_PERSON
+}
+
+enum AuditStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CLOSED
+}
+
+enum AuditType {
+  INTERNAL
+  EXTERNAL
+  THIRD_PARTY
+  ERP
+}
+
+enum FindingStatus {
+  OPEN
+  IN_PROGRESS
+  UNDER_REVIEW
+  CLOSED
+  OVERDUE
+}
+
+enum DocumentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  RELEASED
+  OBSOLETE
+}
+
+enum TrainingStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+}
+
+enum NotificationType {
+  AUDIT_SCHEDULED
+  AUDIT_REMINDER
+  FINDING_ASSIGNED
+  CAP_DUE_SOON
+  CAP_OVERDUE
+  DOCUMENT_APPROVAL
+  TRAINING_EXPIRY
+  SYSTEM_ALERT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          UserRole  @default(STAFF)
+  departmentId  String?
+  base          String?
+  position      String?
+  phone         String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  department            Department?           @relation(fields: [departmentId], references: [id])
+  auditsAsAuditor       AuditAuditor[]
+  auditsAsAuditee       AuditAuditee[]
+  findings              Finding[]
+  correctiveActions     CorrectiveAction[]
+  documentAcknowledged  DocumentAcknowledgment[]
+  trainingRecords       TrainingRecord[]
+  notifications         Notification[]
+  activityLogs          ActivityLog[]
+  checklistResponses    AuditChecklistItemResponse[]
+
+  @@index([email])
+  @@index([departmentId])
+  @@index([role])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  audits      Audit[]
+  findings    Finding[]
+  documents   Document[]
+  trainings   TrainingRecord[]
+}
+
+model Audit {
+  id                String      @id @default(cuid())
+  auditNumber       String      @unique
+  title             String
+  description       String?
+  scope             String
+  departmentId      String
+  base              String
+  scheduledDate     DateTime    // legacy; prefer startDate/endDate
+  startDate         DateTime?   // audit period start (same as endDate for single-day)
+  endDate           DateTime?   // audit period end
+  status            AuditStatus @default(PLANNED)
+  type              AuditType   @default(INTERNAL)
+  checklistUrl      String?
+  reportUrl         String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  createdById       String
+
+  department        Department          @relation(fields: [departmentId], references: [id])
+  auditors          AuditAuditor[]
+  auditees          AuditAuditee[]
+  findings          Finding[]
+  documents         AuditDocument[]
+  checklistId       String?
+  checklist         Checklist?  @relation(fields: [checklistId], references: [id])
+  checklistResponses AuditChecklistItemResponse[]
+  notifications     Notification[]
+  activityLogs      ActivityLog[]
+
+  @@index([departmentId])
+  @@index([scheduledDate])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([status])
+  @@index([auditNumber])
+  @@index([checklistId])
+}
+
+model AuditAuditor {
+  id        String   @id @default(cuid())
+  auditId  String
+  userId   String
+  role     String?  // Lead, Assistant, etc.
+  createdAt DateTime @default(now())
+
+  audit     Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([auditId, userId])
+  @@index([auditId])
+  @@index([userId])
+}
+
+model AuditAuditee {
+  id        String   @id @default(cuid())
+  auditId  String
+  userId   String?   // Optional - null for external auditees
+  name      String?  // For external auditees not in the system
+  email     String?  // For external auditees
+  createdAt DateTime @default(now())
+
+  audit     Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@unique([auditId, userId])
+  @@index([auditId])
+  @@index([userId])
+}
+
+model AuditDocument {
+  id          String   @id @default(cuid())
+  auditId     String
+  name        String
+  fileUrl     String
+  fileType    String
+  fileSize    Int
+  uploadedBy  String
+  uploadedAt  DateTime @default(now())
+
+  audit       Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+}
+
+model Finding {
+  id                String        @id @default(cuid())
+  findingNumber     String        @unique
+  auditId           String
+  departmentId      String
+  policyReference   String
+  description       String
+  rootCause         String?
+  severity          String        // Critical, Major, Minor, Observation
+  priority          String?       // P1, P2, P3 (Priority 1, 2, 3)
+  checklistItemId   String?       // Link to the checklist item that generated this finding
+  status            FindingStatus @default(OPEN)
+  assignedToId      String
+  dueDate           DateTime?
+  capDueDate        DateTime?     // Corrective Action Plan due date (based on priority)
+  closeOutDueDate   DateTime?     // Corrective Action Close Out due date (based on priority)
+  closedDate        DateTime?
+  closedBy          String?
+  rootCauseStatus   String?       @default("PENDING")   // PENDING | APPROVED | REJECTED
+  rootCauseReviewedById String?
+  rootCauseReviewedAt   DateTime?
+  rootCauseRejectionReason String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  createdById       String
+
+  audit             Audit             @relation(fields: [auditId], references: [id])
+  department        Department        @relation(fields: [departmentId], references: [id])
+  assignedTo        User              @relation(fields: [assignedToId], references: [id])
+  checklistItem     ChecklistItem?    @relation(fields: [checklistItemId], references: [id])
+  correctiveAction  CorrectiveAction?
+  attachments       FindingAttachment[]
+  notifications     Notification[]
+  activityLogs      ActivityLog[]
+
+  @@index([auditId])
+  @@index([departmentId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([findingNumber])
+  @@index([priority])
+  @@index([checklistItemId])
+}
+
+model FindingAttachment {
+  id          String   @id @default(cuid())
+  findingId   String
+  name        String
+  fileUrl     String
+  fileType    String
+  fileSize    Int
+  uploadedBy  String
+  uploadedAt  DateTime @default(now())
+
+  finding     Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+}
+
+model CorrectiveAction {
+  id                String   @id @default(cuid())
+  findingId         String   @unique
+  responsibleId     String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // CAP (Corrective Action Plan) specific
+  actionPlan        String
+  dueDate           DateTime
+  capEnteredAt      DateTime?  // when CAP was entered
+  capStatus         String?  @default("PENDING")   // PENDING | APPROVED | REJECTED
+  capReviewedById   String?
+  capReviewedAt     DateTime?
+  capRejectionReason String?
+
+  // CAT (Corrective Action Taken) specific
+  correctiveActionTaken String?
+  catDueDate        DateTime?  // when CAT is due
+  completionDate    DateTime?
+  evidenceUrl       String?  // CAT evidence only
+  catStatus         String?  @default("PENDING")
+  catReviewedById   String?
+  catReviewedAt     DateTime?
+  catRejectionReason String?
+
+  status            FindingStatus @default(IN_PROGRESS)  // overall record workflow
+
+  finding           Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  responsible       User     @relation(fields: [responsibleId], references: [id])
+  attachments       CAPAttachment[]
+  activityLogs      ActivityLog[]
+
+  @@index([responsibleId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model CAPAttachment {
+  id                String   @id @default(cuid())
+  correctiveActionId String
+  name              String
+  fileUrl           String
+  fileType          String
+  fileSize          Int
+  uploadedBy        String
+  uploadedAt        DateTime @default(now())
+
+  correctiveAction CorrectiveAction @relation(fields: [correctiveActionId], references: [id], onDelete: Cascade)
+
+  @@index([correctiveActionId])
+}
+
+model Document {
+  id              String        @id @default(cuid())
+  documentNumber  String        @unique
+  title           String
+  description     String?
+  departmentId    String?
+  version         String
+  status          DocumentStatus @default(DRAFT)
+  fileUrl         String
+  fileType        String
+  fileSize        Int
+  effectiveDate   DateTime?
+  reviewDate      DateTime?
+  obsoleteDate    DateTime?
+  createdById     String
+  reviewedById    String?
+  approvedById    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  department      Department?           @relation(fields: [departmentId], references: [id])
+  revisions       DocumentRevision[]
+  acknowledgments DocumentAcknowledgment[]
+  activityLogs    ActivityLog[]
+
+  @@index([documentNumber])
+  @@index([departmentId])
+  @@index([status])
+}
+
+model DocumentRevision {
+  id          String   @id @default(cuid())
+  documentId  String
+  version     String
+  changeLog   String
+  fileUrl     String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+model DocumentAcknowledgment {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  acknowledgedAt DateTime @default(now())
+  ipAddress  String?
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+}
+
+model TrainingRecord {
+  id              String         @id @default(cuid())
+  userId          String
+  departmentId    String
+  trainingType    String
+  title           String
+  description     String?
+  provider        String?
+  certificateUrl  String?
+  issueDate       DateTime
+  expiryDate      DateTime?
+  status          TrainingStatus @default(COMPLETED)
+  linkedFindingId String?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user            User           @relation(fields: [userId], references: [id])
+  department      Department     @relation(fields: [departmentId], references: [id])
+
+  @@index([userId])
+  @@index([departmentId])
+  @@index([expiryDate])
+  @@index([status])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id])
+  audit     Audit?           @relation(fields: [auditId], references: [id])
+  finding   Finding?         @relation(fields: [findingId], references: [id])
+
+  auditId   String?
+  findingId String?
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String
+  details     String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id])
+  audit       Audit?   @relation(fields: [auditId], references: [id])
+  finding     Finding? @relation(fields: [findingId], references: [id])
+  correctiveAction CorrectiveAction? @relation(fields: [correctiveActionId], references: [id])
+  document    Document? @relation(fields: [documentId], references: [id])
+
+  auditId     String?
+  findingId   String?
+  correctiveActionId String?
+  documentId  String?
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Checklist {
+  id            String          @id @default(cuid())
+  name          String
+  description   String?
+  type          String?         // e.g., 'AMO', 'Internal', etc.
+  checklistType String?         // 'Internal' or 'External'
+  version       String          @default("1.0") // Current version (e.g., "1.0", "1.1", "2.0")
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  createdById   String
+
+  items         ChecklistItem[]
+  audits        Audit[]
+  revisions     ChecklistRevision[]
+
+  @@index([type])
+  @@index([checklistType])
+  @@index([isActive])
+  @@index([version])
+}
+
+model ChecklistRevision {
+  id            String   @id @default(cuid())
+  checklistId   String
+  version       String   // Version number (e.g., "1.0", "1.1", "2.0")
+  changeLog     String?  // Description of changes in this revision
+  createdById   String   // User who created this revision
+  createdAt     DateTime @default(now())
+
+  checklist     Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId])
+  @@index([version])
+  @@index([createdAt])
+}
+
+model ChecklistItem {
+  id                String   @id @default(cuid())
+  checklistId       String
+  type              String   // 'title' or 'question'
+  ref               String?  // Reference number or Auric Air ID
+  auditQuestion     String?  // Audit Question / Check Item
+  complianceCriteria String? // Compliance Criteria
+  docRef            String?  // Document Reference
+  content           String   // For backward compatibility and title content
+  order             Int
+  parentId          String?  // For questions under a title
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  checklist         Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  parent            ChecklistItem? @relation("ChecklistItemHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children          ChecklistItem[] @relation("ChecklistItemHierarchy")
+  auditResponses    AuditChecklistItemResponse[]
+  findings          Finding[]
+
+  @@index([checklistId])
+  @@index([parentId])
+  @@index([order])
+}
+
+model AuditChecklistItemResponse {
+  id                String   @id @default(cuid())
+  auditId           String
+  checklistItemId   String
+  isCompliant       Boolean? // null = not reviewed, true = compliant, false = non-compliant
+  notes             String?  // Objective evidence and notes
+  reviewedById      String   // Auditor who reviewed this item
+  reviewedAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  audit             Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  checklistItem     ChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  reviewer          User         @relation(fields: [reviewedById], references: [id])
+  evidence          AuditChecklistEvidence[]
+
+  @@unique([auditId, checklistItemId])
+  @@index([auditId])
+  @@index([checklistItemId])
+  @@index([reviewedById])
+}
+
+model AuditChecklistEvidence {
+  id                String   @id @default(cuid())
+  responseId        String
+  name              String
+  fileUrl           String
+  fileType          String
+  fileSize          Int
+  uploadedBy        String
+  uploadedAt        DateTime @default(now())
+
+  response          AuditChecklistItemResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@index([responseId])
+}
