@@ -209,8 +209,8 @@ const DocumentViewPage = () => {
         }
         const removeData = await removeRes.json()
         currentFileUrl = removeData.fileUrl ?? currentFileUrl
-        setDocument((prev) =>
-          prev ? { ...prev, fileUrl: currentFileUrl, version: removeData.version ?? prev.version } : prev
+        setDocument((prev: Record<string, unknown> | null) =>
+          prev ? { ...prev, fileUrl: currentFileUrl, version: removeData.version ?? (prev as { version?: unknown }).version } : prev
         )
 
         const newPdfToOrig = originalEditOrder.filter((i) => !removed.includes(i))
@@ -229,9 +229,9 @@ const DocumentViewPage = () => {
             return
           }
           const reorderData = await reorderRes.json()
-          setDocument((prev) =>
+          setDocument((prev: Record<string, unknown> | null) =>
             prev && reorderData.fileUrl
-              ? { ...prev, fileUrl: reorderData.fileUrl, version: reorderData.version ?? prev.version }
+              ? { ...prev, fileUrl: reorderData.fileUrl, version: reorderData.version ?? (prev as { version?: unknown }).version }
               : prev
           )
         }
@@ -250,9 +250,9 @@ const DocumentViewPage = () => {
             return
           }
           const data = await res.json()
-          setDocument((prev) =>
+          setDocument((prev: Record<string, unknown> | null) =>
             prev && data.fileUrl
-              ? { ...prev, fileUrl: data.fileUrl, version: data.version ?? prev.version }
+              ? { ...prev, fileUrl: data.fileUrl, version: data.version ?? (prev as { version?: unknown }).version }
               : prev
           )
         }

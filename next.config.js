@@ -8,11 +8,15 @@ const nextConfig = {
       bodySizeLimit: '2gb',
     },
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
       canvas: false,
     }
+    // Avoid bundling native canvas (used by pdfjs-dist in Node); not needed in browser.
+    config.plugins.push(
+      new (require('webpack').IgnorePlugin)({ resourceRegExp: /^canvas$/ })
+    )
     return config
   },
 }

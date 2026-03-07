@@ -47,10 +47,10 @@ export async function GET(request: Request) {
         )
       }
 
-      const approved = approvedRes.data ?? []
-      const manualHolder = manualHolderRes.data ?? []
+      const approved = (approvedRes.data ?? []) as { id: string; createdAt: string }[]
+      const manualHolder = (manualHolderRes.data ?? []) as { id: string; createdAt: string }[]
       const seen = new Set<string>()
-      const merged: typeof approved = []
+      const merged: { id: string; createdAt: string }[] = []
       for (const doc of [...manualHolder, ...approved]) {
         if (doc && !seen.has(doc.id)) {
           seen.add(doc.id)

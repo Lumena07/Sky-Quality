@@ -25,11 +25,22 @@ import { supabaseBrowserClient } from '@/lib/supabaseClient'
 
 type ApprovalType = 'cap' | 'cat' | null
 
+type CorrectiveActionFromFinding = {
+  actionPlan?: string
+  correctiveActionTaken?: string
+  capStatus?: string
+  catStatus?: string
+  dueDate?: string
+  catDueDate?: string
+  capRejectionReason?: string
+  catRejectionReason?: string
+}
+
 /** Get CorrectiveAction from finding API response; handles PostgREST relation key variants. */
-const getCorrectiveActionFromFinding = (findingData: Record<string, unknown>): { actionPlan?: string; correctiveActionTaken?: string; capStatus?: string; catStatus?: string } | null => {
+const getCorrectiveActionFromFinding = (findingData: Record<string, unknown>): CorrectiveActionFromFinding | null => {
   const raw = findingData.CorrectiveAction ?? findingData.correctiveAction ?? (findingData as Record<string, unknown>).corrective_action
-  if (Array.isArray(raw) && raw.length > 0) return raw[0] as { actionPlan?: string; correctiveActionTaken?: string; capStatus?: string; catStatus?: string }
-  if (raw && typeof raw === 'object') return raw as { actionPlan?: string; correctiveActionTaken?: string; capStatus?: string; catStatus?: string }
+  if (Array.isArray(raw) && raw.length > 0) return raw[0] as CorrectiveActionFromFinding
+  if (raw && typeof raw === 'object') return raw as CorrectiveActionFromFinding
   return null
 }
 

@@ -62,7 +62,7 @@ export async function GET(
       ...auditors.map((a) => (a as { userId?: string }).userId).filter(Boolean),
       ...auditees.map((a) => (a as { userId?: string }).userId).filter(Boolean),
     ] as string[]
-    const uniqueUserIds = [...new Set(userIds)]
+    const uniqueUserIds = Array.from(new Set(userIds))
 
     let userMap: Record<string, { id: string; firstName?: string; lastName?: string; email?: string }> = {}
     if (uniqueUserIds.length > 0) {

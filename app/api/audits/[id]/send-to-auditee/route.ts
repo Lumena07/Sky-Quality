@@ -63,7 +63,7 @@ export async function POST(
     const userIds = auditees
       .map((a: { userId: string | null }) => a.userId)
       .filter(Boolean) as string[]
-    const uniqueUserIds = [...new Set(userIds)]
+    const uniqueUserIds = Array.from(new Set(userIds))
 
     const notifications = uniqueUserIds.map((userId) => ({
       id: randomUUID(),

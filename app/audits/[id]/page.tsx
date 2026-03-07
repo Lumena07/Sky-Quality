@@ -1010,13 +1010,13 @@ const AuditDetailPage = () => {
                                   : '—'}
                               </td>
                               <td className="px-3 py-2 border border-border align-top">
-                                {correctiveAction?.actionPlan || '—'}
+                                {correctiveAction?.actionPlan != null ? String(correctiveAction.actionPlan) : '—'}
                               </td>
                               <td className="px-3 py-2 border border-border align-top">
                                 {rootCauseDue ? formatDate(rootCauseDue) : '—'}
                               </td>
                               <td className="px-3 py-2 border border-border align-top">
-                                {correctiveAction?.createdAt ? formatDateTime(correctiveAction.createdAt) : '—'}
+                                {correctiveAction?.createdAt ? formatDateTime(correctiveAction.createdAt as string) : '—'}
                               </td>
                               <td className="px-3 py-2 border border-border align-top">
                                 {correctiveAction?.correctiveActionTaken ? (
@@ -1031,7 +1031,7 @@ const AuditDetailPage = () => {
                               <td className="px-3 py-2 border border-border align-top">
                                 {catSubmitted ? (
                                   <span className="text-green-600 font-medium" title="Corrective action taken submitted">
-                                    ✓ {correctiveAction?.updatedAt ? formatDateTime(correctiveAction.updatedAt) : ''}
+                                    ✓ {correctiveAction?.updatedAt ? formatDateTime(correctiveAction.updatedAt as string) : ''}
                                   </span>
                                 ) : '—'}
                               </td>

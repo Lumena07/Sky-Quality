@@ -152,10 +152,10 @@ export const ChecklistBuilder = ({ checklistId, onSave }: ChecklistBuilderProps)
             id: item.id || `temp-title-${index}`,
             order: index,
             parentId: null,
-            ref: null,
-            auditQuestion: null,
-            complianceCriteria: null,
-            docRef: null,
+            ref: undefined,
+            auditQuestion: undefined,
+            complianceCriteria: undefined,
+            docRef: undefined,
           })
         } else {
           // Find the nearest title above this question
@@ -446,7 +446,7 @@ export const ChecklistBuilder = ({ checklistId, onSave }: ChecklistBuilderProps)
       const start = Math.min(lastSelected, index)
       const end = Math.max(lastSelected, index)
       const range = Array.from({ length: end - start + 1 }, (_, i) => start + i)
-      setSelectedRows([...new Set([...selectedRows, ...range])])
+      setSelectedRows(Array.from(new Set([...selectedRows, ...range])))
     } else {
       // Single select
       setSelectedRows([index])

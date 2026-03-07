@@ -247,7 +247,7 @@ export const AuditCalendar = ({ audits, onDateClick }: AuditCalendarProps) => {
                                 const auditors = audit.auditors || []
                                 const auditorColors = auditors
                                   .map((a: any) => auditorColorMap.get(a.user?.id))
-                                  .filter((color) => color !== undefined)
+                                  .filter((color: string | undefined) => color !== undefined)
 
                                 return (
                                   <div
@@ -277,7 +277,7 @@ export const AuditCalendar = ({ audits, onDateClick }: AuditCalendarProps) => {
                                     </div>
                                     {auditorColors.length > 0 && (
                                       <div className="w-full h-1 rounded overflow-hidden flex gap-px">
-                                        {auditorColors.map((color, idx) => (
+                                        {auditorColors.map((color: string, idx: number) => (
                                           <div
                                             key={idx}
                                             className="flex-1 rounded"

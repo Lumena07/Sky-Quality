@@ -68,6 +68,7 @@ export const canEditDocument = (
   roles: string[]
 ): boolean => !isReviewOrDraft || isManualHolder || hasReviewerRole(roles)
 
+/** Narrow type for permission helpers; cast internally to avoid deep Supabase client instantiation. */
 type SupabaseClientLike = {
   from: (table: string) => {
     select: (columns: string) => {
@@ -78,7 +79,7 @@ type SupabaseClientLike = {
 
 /** Fetch current user's roles from User table (for API use). */
 export async function getCurrentUserRoles(
-  supabase: SupabaseClientLike,
+  supabase: unknown,
   authUserId: string
 ): Promise<string[]> {
   const profile = await getCurrentUserProfile(supabase, authUserId)
@@ -87,10 +88,11 @@ export async function getCurrentUserRoles(
 
 /** Fetch current user's roles and departmentId from User table (for API use). */
 export async function getCurrentUserProfile(
-  supabase: SupabaseClientLike,
+  supabase: unknown,
   authUserId: string
 ): Promise<{ roles: string[]; departmentId: string | null }> {
-  const { data } = await supabase
+  const client = supabase as SupabaseClientLike
+  const { data } = await client
     .from('User')
     .select('roles, role, departmentId')
     .eq('id', authUserId)

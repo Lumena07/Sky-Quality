@@ -70,7 +70,7 @@ export async function POST(
     }
 
     const newPdf = await PDFDocument.create()
-    const indicesToKeep = [...Array(totalPages).keys()].filter((i) => !toRemove.has(i))
+    const indicesToKeep = Array.from(Array(totalPages).keys()).filter((i) => !toRemove.has(i))
     const pages = await newPdf.copyPages(pdfDoc, indicesToKeep)
     pages.forEach((page) => newPdf.addPage(page))
 

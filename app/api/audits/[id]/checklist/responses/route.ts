@@ -49,8 +49,18 @@ export async function GET(
       .eq('auditId', params.id)
       .not('checklistItemId', 'is', null)
 
-    const findingsByChecklistItemId = new Map<string, typeof findings>()
-    ;(findings ?? []).forEach((f: { checklistItemId: string }) => {
+    type FindingRow = {
+      id: string
+      findingNumber: string
+      checklistItemId: string
+      departmentId: string | null
+      description: string | null
+      priority: string | null
+      assignedToId: string | null
+      status: string
+    }
+    const findingsByChecklistItemId = new Map<string, FindingRow[]>()
+    ;(findings ?? []).forEach((f: FindingRow) => {
       const list = findingsByChecklistItemId.get(f.checklistItemId) ?? []
       list.push(f)
       findingsByChecklistItemId.set(f.checklistItemId, list)

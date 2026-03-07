@@ -228,6 +228,7 @@ export const AuditExecution = ({
         response = newResponse
         responseMap.set(itemId, newResponse)
       }
+      if (!response) return
 
       const res = await fetch(`/api/audits/${auditId}/checklist/responses/${response.id}/evidence`, {
         method: 'POST',
@@ -632,7 +633,7 @@ export const AuditExecution = ({
                                   </Badge>
                                   <Button
                                     type="button"
-                                    size="xs"
+                                    size="sm"
                                     variant="ghost"
                                     onClick={() =>
                                       setEditingFindingIds((prev) => ({
@@ -647,7 +648,7 @@ export const AuditExecution = ({
                                   </Button>
                                   <Button
                                     type="button"
-                                    size="xs"
+                                    size="sm"
                                     variant="ghost"
                                     onClick={() => handleDeleteFinding(finding.id, finding.findingNumber)}
                                     aria-label={`Delete ${finding.findingNumber}`}

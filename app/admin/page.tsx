@@ -399,7 +399,7 @@ const AdminPage = () => {
           }),
         })
         if (res.ok) {
-          setDeptForm({ name: '', code: '', description: '' })
+          setDeptForm({ name: '', code: '', description: '', isActive: true })
           setDeptDialogOpen(false)
           fetchDepartments()
         } else {
