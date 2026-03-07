@@ -8,11 +8,32 @@ export const REVIEWER_ROLES = new Set([
 /** Only these roles see Admin and have full permissions. */
 export const ADMIN_OR_QM = new Set(['SYSTEM_ADMIN', 'QUALITY_MANAGER'])
 
+/** Accountable Manager: sees AM dashboard and escalations; oversight role per ICAO / Auric Air Manual. */
+export const ACCOUNTABLE_MANAGER_ROLE = 'ACCOUNTABLE_MANAGER'
+
+/** Roles that see full dashboard, AM dashboard, and oversight data (Admin + AM). */
+export const ADMIN_OR_QM_OR_AM = new Set([
+  'SYSTEM_ADMIN',
+  'QUALITY_MANAGER',
+  ACCOUNTABLE_MANAGER_ROLE,
+])
+
 export const hasReviewerRole = (roles: string[]): boolean =>
   roles.some((r) => REVIEWER_ROLES.has(r))
 
 export const isAdminOrQM = (roles: string[]): boolean =>
   roles.some((r) => ADMIN_OR_QM.has(r))
+
+export const isAccountableManager = (roles: string[]): boolean =>
+  roles.some((r) => r === ACCOUNTABLE_MANAGER_ROLE)
+
+/** Can see AM dashboard and escalation data. */
+export const canSeeAmDashboard = (roles: string[]): boolean =>
+  roles.some((r) => ADMIN_OR_QM_OR_AM.has(r))
+
+/** Can view the full activity log (system behaviour). */
+export const canViewActivityLog = (roles: string[]): boolean =>
+  canSeeAmDashboard(roles) || hasReviewerRole(roles)
 
 export const isAuditorOnly = (roles: string[]): boolean =>
   roles.some((r) => r === 'AUDITOR') && !isAdminOrQM(roles)

@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/cap-notifications",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/escalate-to-am",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/training-expiry",
+      "schedule": "0 8 * * 0"
+    }
+  ]
+}

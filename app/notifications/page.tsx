@@ -27,6 +27,7 @@ const NotificationTypeLabels: Record<string, string> = {
   DOCUMENT_APPROVAL: 'Document approval',
   TRAINING_EXPIRY: 'Training expiry',
   SYSTEM_ALERT: 'System alert',
+  ESCALATION_TO_AM: 'Escalation to AM',
 }
 
 const NotificationsPage = () => {

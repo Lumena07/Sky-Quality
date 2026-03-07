@@ -13,6 +13,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/notifications') ||
     pathname.startsWith('/checklists') ||
     pathname.startsWith('/admin') ||
+    pathname.startsWith('/activity-log') ||
+    pathname.startsWith('/training') ||
     pathname.startsWith('/change-password')
 
   const accessToken =
@@ -29,5 +31,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/audits/:path*', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/change-password'],
+  matcher: ['/dashboard/:path*', '/audits/:path*', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password'],
 }

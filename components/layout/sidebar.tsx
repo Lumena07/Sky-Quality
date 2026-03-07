@@ -13,10 +13,14 @@ import {
   LogOut,
   ClipboardList,
   KeyRound,
+  Shield,
+  History,
+  TrendingUp,
+  BookOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
-import { isAdminOrQM, isAuditorOnly, isNormalUser, isFocalPersonOnly } from '@/lib/permissions'
+import { isAdminOrQM, isAuditorOnly, isNormalUser, isFocalPersonOnly, canSeeAmDashboard } from '@/lib/permissions'
 
 const allMenuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -24,6 +28,10 @@ const allMenuItems = [
   { href: '/checklists', label: 'Checklists', icon: ClipboardList },
   { href: '/findings', label: 'Findings & CAP', icon: AlertCircle },
   { href: '/documents', label: 'Documents', icon: FileText },
+  { href: '/training', label: 'Training', icon: BookOpen },
+  { href: '/dashboard/am', label: 'AM Dashboard', icon: Shield },
+  { href: '/dashboard/performance', label: 'Performance', icon: TrendingUp },
+  { href: '/activity-log', label: 'Activity Log', icon: History },
   { href: '/admin', label: 'Admin', icon: Settings },
 ]
 
@@ -51,7 +59,7 @@ export const Sidebar = () => {
 
   const menuItems = (() => {
     const normalUserItems = allMenuItems.filter((item) =>
-      ['/dashboard', '/findings', '/documents'].includes(item.href)
+      ['/dashboard', '/findings', '/documents', '/training'].includes(item.href)
     )
     const focalPersonItems = allMenuItems.filter((item) =>
       ['/dashboard', '/findings'].includes(item.href)
@@ -69,6 +77,9 @@ export const Sidebar = () => {
       return allMenuItems
     }
     if (isAuditorOnly(roles)) {
+      return allMenuItems.filter((item) => item.href !== '/admin')
+    }
+    if (canSeeAmDashboard(roles)) {
       return allMenuItems.filter((item) => item.href !== '/admin')
     }
     if (isNormalUser(roles)) {

@@ -19,6 +19,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
 
 type ApprovalType = 'cap' | 'cat' | null
@@ -48,6 +50,14 @@ const FindingDetailPage = () => {
   const [editCat, setEditCat] = useState('')
   const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false)
   const [catSaveFeedback, setCatSaveFeedback] = useState<'success' | 'error' | null>(null)
+  const [extensionRequests, setExtensionRequests] = useState<any[]>([])
+  const [extensionDialogOpen, setExtensionDialogOpen] = useState(false)
+  const [extReason, setExtReason] = useState('')
+  const [extCapDue, setExtCapDue] = useState('')
+  const [extCloseOutDue, setExtCloseOutDue] = useState('')
+  const [extSubmitting, setExtSubmitting] = useState(false)
+  const [extReviewingId, setExtReviewingId] = useState<string | null>(null)
+  const [extRejectDialog, setExtRejectDialog] = useState<{ requestId: string; notes: string } | null>(null)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -71,6 +81,22 @@ const FindingDetailPage = () => {
   useEffect(() => {
     if (params.id) fetchFinding()
   }, [params.id])
+
+  const fetchExtensionRequests = async () => {
+    if (!params.id) return
+    try {
+      const res = await fetch(`/api/findings/${params.id}/extension-requests`, { credentials: 'same-origin' })
+      if (res.ok) {
+        const data = await res.json()
+        setExtensionRequests(data)
+      }
+    } catch {
+      setExtensionRequests([])
+    }
+  }
+  useEffect(() => {
+    if (finding && params.id) fetchExtensionRequests()
+  }, [finding, params.id])
 
   const fetchFinding = async () => {
     setFetchError(null)
@@ -485,6 +511,243 @@ const FindingDetailPage = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Extension requests (auditee request; reviewer approve/reject) */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Extension requests</CardTitle>
+            {isAssignee && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setExtReason('')
+                  setExtCapDue('')
+                  setExtCloseOutDue('')
+                  setExtensionDialogOpen(true)
+                }}
+              >
+                Request extension
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {extensionRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No extension requests. As assignee you can request an extension for CAP or close-out due dates.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {extensionRequests.map((req: any) => (
+                  <li key={req.id} className="border rounded-lg p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <Badge
+                        className={
+                          req.status === 'APPROVED'
+                            ? 'bg-green-100 text-green-800'
+                            : req.status === 'REJECTED'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-800'
+                        }
+                      >
+                        {req.status}
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        Requested {req.requestedAt ? formatDate(req.requestedAt) : ''}
+                      </span>
+                    </div>
+                    <p className="font-medium mb-1">Reason</p>
+                    <p className="whitespace-pre-wrap text-muted-foreground mb-2">{req.reason}</p>
+                    {(req.requestedCapDueDate || req.requestedCloseOutDueDate) && (
+                      <p className="text-muted-foreground text-xs mb-2">
+                        CAP due: {req.requestedCapDueDate ?? '—'} · Close-out due: {req.requestedCloseOutDueDate ?? '—'}
+                      </p>
+                    )}
+                    {req.status === 'REJECTED' && req.reviewNotes && (
+                      <p className="text-red-700 text-xs">Review notes: {req.reviewNotes}</p>
+                    )}
+                    {canReview && req.status === 'PENDING' && (
+                      <div className="flex gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            setExtReviewingId(req.id)
+                            try {
+                              const res = await fetch(
+                                `/api/findings/${params.id}/extension-requests/${req.id}`,
+                                {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ status: 'APPROVED' }),
+                                  credentials: 'same-origin',
+                                }
+                              )
+                              if (res.ok) await fetchExtensionRequests().then(() => fetchFinding())
+                              else alert((await res.json().catch(() => ({}))).error ?? 'Failed to approve')
+                            } finally {
+                              setExtReviewingId(null)
+                            }
+                          }}
+                          disabled={extReviewingId !== null}
+                        >
+                          {extReviewingId === req.id ? 'Approving...' : 'Approve'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setExtRejectDialog({ requestId: req.id, notes: '' })}
+                          disabled={extReviewingId !== null}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Request extension</DialogTitle>
+              <DialogDescription>
+                Request an extension for CAP and/or close-out due dates. A reviewer will approve or reject.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="ext-reason">Reason *</Label>
+                <Textarea
+                  id="ext-reason"
+                  value={extReason}
+                  onChange={(e) => setExtReason(e.target.value)}
+                  placeholder="Explain why you need an extension..."
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ext-cap">Requested CAP due date</Label>
+                  <Input
+                    id="ext-cap"
+                    type="date"
+                    value={extCapDue}
+                    onChange={(e) => setExtCapDue(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ext-close">Requested close-out due date</Label>
+                  <Input
+                    id="ext-close"
+                    type="date"
+                    value={extCloseOutDue}
+                    onChange={(e) => setExtCloseOutDue(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setExtensionDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!extReason.trim() || extSubmitting}
+                  onClick={async () => {
+                    setExtSubmitting(true)
+                    try {
+                      const res = await fetch(`/api/findings/${params.id}/extension-request`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          reason: extReason.trim(),
+                          requestedCapDueDate: extCapDue || null,
+                          requestedCloseOutDueDate: extCloseOutDue || null,
+                        }),
+                        credentials: 'same-origin',
+                      })
+                      if (res.ok) {
+                        setExtensionDialogOpen(false)
+                        fetchExtensionRequests()
+                      } else {
+                        const err = await res.json().catch(() => ({}))
+                        alert(err.error ?? 'Failed to submit request')
+                      }
+                    } finally {
+                      setExtSubmitting(false)
+                    }
+                  }}
+                >
+                  {extSubmitting ? 'Submitting...' : 'Submit'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={extRejectDialog !== null}
+          onOpenChange={(open) => !open && setExtRejectDialog(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reject extension request</DialogTitle>
+              <DialogDescription>Optionally add notes for the assignee.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="ext-reject-notes">Review notes</Label>
+                <Textarea
+                  id="ext-reject-notes"
+                  value={extRejectDialog?.notes ?? ''}
+                  onChange={(e) =>
+                    setExtRejectDialog((d) => (d ? { ...d, notes: e.target.value } : null))
+                  }
+                  placeholder="Optional..."
+                  rows={2}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setExtRejectDialog(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={extReviewingId !== null}
+                  onClick={async () => {
+                    if (!extRejectDialog) return
+                    setExtReviewingId(extRejectDialog.requestId)
+                    try {
+                      const res = await fetch(
+                        `/api/findings/${params.id}/extension-requests/${extRejectDialog.requestId}`,
+                        {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            status: 'REJECTED',
+                            reviewNotes: extRejectDialog.notes.trim() || null,
+                          }),
+                          credentials: 'same-origin',
+                        }
+                      )
+                      if (res.ok) {
+                        setExtRejectDialog(null)
+                        fetchExtensionRequests().then(() => fetchFinding())
+                      } else {
+                        alert((await res.json().catch(() => ({}))).error ?? 'Failed to reject')
+                      }
+                    } finally {
+                      setExtReviewingId(null)
+                    }
+                  }}
+                >
+                  {extReviewingId === extRejectDialog?.requestId ? 'Rejecting...' : 'Reject'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={rejectDialogOpen !== null} onOpenChange={(open) => !open && setRejectDialogOpen(null)}>
           <DialogContent>

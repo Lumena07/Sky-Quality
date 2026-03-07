@@ -50,7 +50,12 @@ const FindingsPage = () => {
 
   const fetchFindings = async () => {
     try {
-      const url = filter !== 'all' ? `/api/findings?status=${filter}` : '/api/findings'
+      const url =
+        filter === 'follow-up'
+          ? '/api/findings?needsFollowUp=true'
+          : filter !== 'all'
+            ? `/api/findings?status=${filter}`
+            : '/api/findings'
       const res = await fetch(url)
       if (res.ok) {
         const data = await res.json()
@@ -225,6 +230,14 @@ const FindingsPage = () => {
                   onClick={() => setFilter('IN_PROGRESS')}
                 >
                   In Progress
+                </Button>
+                <Button
+                  variant={filter === 'follow-up' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilter('follow-up')}
+                  aria-label="Findings needing follow-up"
+                >
+                  Follow-up
                 </Button>
                 <Button
                   variant={filter === 'CLOSED' ? 'default' : 'outline'}

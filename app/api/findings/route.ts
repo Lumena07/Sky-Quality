@@ -23,6 +23,7 @@ export async function GET(request: Request) {
     const status = searchParams.get('status')
     const departmentId = searchParams.get('departmentId')
     const overdue = searchParams.get('overdue')
+    const needsFollowUp = searchParams.get('needsFollowUp') === 'true'
 
     let query = supabase
       .from('Finding')
@@ -54,6 +55,9 @@ export async function GET(request: Request) {
         .lt('dueDate', new Date().toISOString())
         .neq('status', 'CLOSED')
     }
+    if (needsFollowUp) {
+      query = query.neq('status', 'CLOSED')
+    }
 
     const { data: findings, error } = await query
 
@@ -65,7 +69,37 @@ export async function GET(request: Request) {
       )
     }
 
-    return NextResponse.json(findings ?? [])
+    let result = findings ?? []
+
+    if (needsFollowUp) {
+      const now = new Date().toISOString()
+      result = result.filter((f: Record<string, unknown>) => {
+        if (f.status === 'CLOSED') return false
+        const rootCause = f.rootCause as string | null | undefined
+        const rootCauseStatus = f.rootCauseStatus as string | null | undefined
+        const capDueDate = f.capDueDate as string | null | undefined
+        const dueDate = f.dueDate as string | null | undefined
+        const correctiveAction = Array.isArray(f.CorrectiveAction)
+          ? (f.CorrectiveAction as Record<string, unknown>[])[0]
+          : (f.CorrectiveAction as Record<string, unknown> | null | undefined)
+        const ca = correctiveAction ?? (f.correctiveAction as Record<string, unknown> | null | undefined)
+        const capStatus = ca?.capStatus as string | null | undefined
+        const caDueDate = ca?.dueDate as string | null | undefined
+
+        const rootCauseMissing = rootCause == null || String(rootCause).trim() === ''
+        const rootCauseNotApproved = rootCauseStatus !== 'APPROVED'
+        const noCap = !ca
+        const capNotApproved = ca ? capStatus !== 'APPROVED' : true
+        const pastDue =
+          (dueDate && dueDate < now) ||
+          (capDueDate && capDueDate < now) ||
+          (caDueDate && caDueDate < now)
+
+        return rootCauseMissing || rootCauseNotApproved || noCap || capNotApproved || pastDue
+      })
+    }
+
+    return NextResponse.json(result)
   } catch (error) {
     console.error('Error fetching findings:', error)
     return NextResponse.json(

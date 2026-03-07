@@ -36,6 +36,9 @@ const auditSchema = z
     startDate: z.date(),
     endDate: z.date(),
     type: z.enum(['INTERNAL', 'EXTERNAL', 'THIRD_PARTY', 'ERP']),
+    openingMeetingAt: z.string().optional(),
+    closingMeetingAt: z.string().optional(),
+    scheduleNotes: z.string().optional(),
   })
   .refine((data) => data.endDate >= data.startDate, {
     message: 'End date must be on or after start date',
@@ -74,6 +77,9 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
       startDate: new Date(),
       endDate: new Date(),
       type: 'INTERNAL',
+      openingMeetingAt: '',
+      closingMeetingAt: '',
+      scheduleNotes: '',
     },
   })
 
@@ -385,6 +391,41 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
           </p>
         </div>
       </div>
+
+      {auditType !== 'ERP' && (
+        <div className="space-y-4 border-t pt-4">
+          <h3 className="text-sm font-medium">Audit schedule (optional)</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="openingMeetingAt">Opening meeting</Label>
+              <Input
+                id="openingMeetingAt"
+                type="datetime-local"
+                {...register('openingMeetingAt')}
+                className="w-full"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="closingMeetingAt">Closing meeting</Label>
+              <Input
+                id="closingMeetingAt"
+                type="datetime-local"
+                {...register('closingMeetingAt')}
+                className="w-full"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="scheduleNotes">Schedule notes</Label>
+            <Textarea
+              id="scheduleNotes"
+              {...register('scheduleNotes')}
+              placeholder="Process steps, agenda, or notes from the manual..."
+              className="min-h-[80px]"
+            />
+          </div>
+        </div>
+      )}
 
       {(auditType === 'INTERNAL' || auditType === 'EXTERNAL' || auditType === 'THIRD_PARTY') && (
       <div

@@ -12,6 +12,7 @@ import { FileText, AlertCircle, CheckCircle, Download } from 'lucide-react'
 import Link from 'next/link'
 import { FileUpload, FileList } from '@/components/ui/file-upload'
 import { AuditExecution } from '@/components/audits/audit-execution'
+import { MeetingAttendanceList } from '@/components/audits/meeting-attendance-list'
 import { downloadAuditReportPDF } from '@/lib/export/pdf'
 import {
   Dialog,
@@ -29,6 +30,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { isAdminOrQM } from '@/lib/permissions'
 
 /** Get CorrectiveAction from finding (handles API shape: array or single). */
@@ -52,6 +55,20 @@ const AuditDetailPage = () => {
   const [departments, setDepartments] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<string>('overview')
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  const [rescheduleForm, setRescheduleForm] = useState({
+    startDate: '',
+    endDate: '',
+    openingMeetingAt: '',
+    closingMeetingAt: '',
+    scheduleNotes: '',
+  })
+  const [savingReschedule, setSavingReschedule] = useState(false)
+  const [openingAttendance, setOpeningAttendance] = useState<any[]>([])
+  const [closingAttendance, setClosingAttendance] = useState<any[]>([])
+  const [sendingToAuditee, setSendingToAuditee] = useState(false)
+  const [closingNotesEdit, setClosingNotesEdit] = useState('')
+  const [savingClosingNotes, setSavingClosingNotes] = useState(false)
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -82,6 +99,44 @@ const AuditDetailPage = () => {
       fetchChecklistResponses()
     }
   }, [params.id, audit?.status, audit?.checklistId])
+
+  const fetchOpeningAttendance = async () => {
+    try {
+      const res = await fetch(`/api/audits/${params.id}/meetings/attendance?meetingType=OPENING`)
+      if (res.ok) {
+        const data = await res.json()
+        setOpeningAttendance(data)
+      }
+    } catch {
+      setOpeningAttendance([])
+    }
+  }
+  const fetchClosingAttendance = async () => {
+    try {
+      const res = await fetch(`/api/audits/${params.id}/meetings/attendance?meetingType=CLOSING`)
+      if (res.ok) {
+        const data = await res.json()
+        setClosingAttendance(data)
+      }
+    } catch {
+      setClosingAttendance([])
+    }
+  }
+  useEffect(() => {
+    if (params.id && audit?.status === 'ACTIVE' && activeTab === 'opening') {
+      fetchOpeningAttendance()
+    }
+  }, [params.id, audit?.status, activeTab])
+  useEffect(() => {
+    if (params.id && (audit?.status === 'ACTIVE' || audit?.status === 'COMPLETED') && activeTab === 'closing') {
+      fetchClosingAttendance()
+    }
+  }, [params.id, audit?.status, activeTab])
+  useEffect(() => {
+    if (audit && activeTab === 'closing') {
+      setClosingNotesEdit(audit.closingMeetingNotes ?? '')
+    }
+  }, [activeTab, audit])
 
   const assignableUsers = useMemo(() => {
     if (!audit) return []
@@ -316,6 +371,46 @@ const AuditDetailPage = () => {
     downloadAuditReportPDF(reportData)
   }
 
+  const handleRescheduleSubmit = async () => {
+    if (!audit) return
+    const start = rescheduleForm.startDate
+      ? new Date(rescheduleForm.startDate + 'T00:00:00').toISOString()
+      : undefined
+    const end = rescheduleForm.endDate
+      ? new Date(rescheduleForm.endDate + 'T23:59:59').toISOString()
+      : undefined
+    if (rescheduleForm.startDate && rescheduleForm.endDate && rescheduleForm.endDate < rescheduleForm.startDate) {
+      alert('End date must be on or after start date')
+      return
+    }
+    setSavingReschedule(true)
+    try {
+      const res = await fetch(`/api/audits/${params.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: start,
+          endDate: end,
+          openingMeetingAt: rescheduleForm.openingMeetingAt || null,
+          closingMeetingAt: rescheduleForm.closingMeetingAt || null,
+          scheduleNotes: rescheduleForm.scheduleNotes || null,
+        }),
+      })
+      if (res.ok) {
+        setRescheduleOpen(false)
+        fetchAudit()
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to update schedule')
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Failed to update schedule')
+    } finally {
+      setSavingReschedule(false)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'PLANNED':
@@ -392,12 +487,21 @@ const AuditDetailPage = () => {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             {!isERP && (
+              <TabsTrigger value="schedule">Audit Schedule</TabsTrigger>
+            )}
+            {!isERP && (
               <>
+                {audit.status === 'ACTIVE' && (
+                  <TabsTrigger value="opening">Opening Meeting</TabsTrigger>
+                )}
                 <TabsTrigger value="checklist">Checklist</TabsTrigger>
                 {audit.status === 'ACTIVE' && (
                   <TabsTrigger value="execution">Execution</TabsTrigger>
                 )}
                 <TabsTrigger value="findings">Findings</TabsTrigger>
+                {(audit.status === 'ACTIVE' || audit.status === 'COMPLETED') && (
+                  <TabsTrigger value="closing">Closing Meeting</TabsTrigger>
+                )}
               </>
             )}
             <TabsTrigger value="team">Team</TabsTrigger>
@@ -465,10 +569,237 @@ const AuditDetailPage = () => {
                       Complete Audit
                     </Button>
                   )}
+                  {(audit.status === 'PLANNED' || audit.status === 'ACTIVE') && canEditAudit && (
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                      onClick={() => {
+                        const start = audit.startDate ?? audit.scheduledDate
+                        const end = audit.endDate ?? audit.scheduledDate
+                        const toLocalDatetime = (d: string | undefined) => {
+                          if (!d) return ''
+                          const date = new Date(d)
+                          const y = date.getFullYear()
+                          const m = String(date.getMonth() + 1).padStart(2, '0')
+                          const day = String(date.getDate()).padStart(2, '0')
+                          const h = String(date.getHours()).padStart(2, '0')
+                          const min = String(date.getMinutes()).padStart(2, '0')
+                          return `${y}-${m}-${day}T${h}:${min}`
+                        }
+                        setRescheduleForm({
+                          startDate: start ? formatDate(start) : '',
+                          endDate: end ? formatDate(end) : '',
+                          openingMeetingAt: audit.openingMeetingAt ? toLocalDatetime(audit.openingMeetingAt) : '',
+                          closingMeetingAt: audit.closingMeetingAt ? toLocalDatetime(audit.closingMeetingAt) : '',
+                          scheduleNotes: audit.scheduleNotes ?? '',
+                        })
+                        setRescheduleOpen(true)
+                      }}
+                    >
+                      Reschedule
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
+
+          {!isERP && (
+          <TabsContent value="schedule" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Audit Schedule</CardTitle>
+                  {audit.status === 'PLANNED' && canEditAudit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const start = audit.startDate ?? audit.scheduledDate
+                        const end = audit.endDate ?? audit.scheduledDate
+                        const toLocalDatetime = (d: string | undefined) => {
+                          if (!d) return ''
+                          const date = new Date(d)
+                          const y = date.getFullYear()
+                          const m = String(date.getMonth() + 1).padStart(2, '0')
+                          const day = String(date.getDate()).padStart(2, '0')
+                          const h = String(date.getHours()).padStart(2, '0')
+                          const min = String(date.getMinutes()).padStart(2, '0')
+                          return `${y}-${m}-${day}T${h}:${min}`
+                        }
+                        setRescheduleForm({
+                          startDate: start ? formatDate(start) : '',
+                          endDate: end ? formatDate(end) : '',
+                          openingMeetingAt: audit.openingMeetingAt ? toLocalDatetime(audit.openingMeetingAt) : '',
+                          closingMeetingAt: audit.closingMeetingAt ? toLocalDatetime(audit.closingMeetingAt) : '',
+                          scheduleNotes: audit.scheduleNotes ?? '',
+                        })
+                        setRescheduleOpen(true)
+                      }}
+                    >
+                      Edit schedule
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Opening meeting</p>
+                    <p className="font-medium">
+                      {audit.openingMeetingAt
+                        ? formatDateTime(audit.openingMeetingAt)
+                        : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Closing meeting</p>
+                    <p className="font-medium">
+                      {audit.closingMeetingAt
+                        ? formatDateTime(audit.closingMeetingAt)
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+                {audit.scheduleNotes && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Schedule notes</p>
+                    <p className="font-medium whitespace-pre-wrap">{audit.scheduleNotes}</p>
+                  </div>
+                )}
+                {!audit.openingMeetingAt && !audit.closingMeetingAt && !audit.scheduleNotes && (
+                  <p className="text-sm text-muted-foreground">
+                    No schedule details yet. Use Edit schedule or Reschedule from Overview to add opening/closing meeting times and notes.
+                  </p>
+                )}
+                {audit.status === 'PLANNED' && canEditAudit && (
+                  <Button
+                    className="w-full mt-4"
+                    variant="secondary"
+                    disabled={sendingToAuditee}
+                    onClick={async () => {
+                      setSendingToAuditee(true)
+                      try {
+                        const res = await fetch(`/api/audits/${params.id}/send-to-auditee`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                        })
+                        const data = await res.json().catch(() => ({}))
+                        if (res.ok) {
+                          alert(data.message ?? 'Checklist and schedule sent to auditees.')
+                        } else {
+                          alert(data.error ?? 'Failed to send')
+                        }
+                      } finally {
+                        setSendingToAuditee(false)
+                      }
+                    }}
+                  >
+                    {sendingToAuditee ? 'Sending...' : 'Send checklist & schedule to auditee'}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          )}
+
+          {!isERP && audit.status === 'ACTIVE' && (
+          <TabsContent value="opening" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Opening meeting</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {audit.openingMeetingAt
+                    ? formatDateTime(audit.openingMeetingAt)
+                    : 'Date/time not set — update in Audit Schedule.'}
+                </p>
+                <div>
+                  <p className="text-sm font-medium mb-2">Attendance</p>
+                  <MeetingAttendanceList
+                    auditId={params.id as string}
+                    meetingType="OPENING"
+                    attendance={openingAttendance}
+                    canEdit={canEditAudit}
+                    onRefresh={fetchOpeningAttendance}
+                    meId={me?.id}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          )}
+
+          {!isERP && (audit.status === 'ACTIVE' || audit.status === 'COMPLETED') && (
+          <TabsContent value="closing" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Closing meeting</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {audit.closingMeetingAt
+                    ? formatDateTime(audit.closingMeetingAt)
+                    : 'Date/time not set — update in Audit Schedule.'}
+                </p>
+                <div>
+                  <p className="text-sm font-medium mb-2">Findings summary</p>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    {(audit.Findings ?? audit.findings)?.length > 0
+                      ? `${(audit.Findings ?? audit.findings).length} finding(s). See Findings tab for details.`
+                      : 'No findings recorded.'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-1">Closing meeting notes</p>
+                  {canEditAudit ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={closingNotesEdit}
+                        placeholder="Discussion summary, action items..."
+                        className="min-h-[100px]"
+                        onChange={(e) => setClosingNotesEdit(e.target.value)}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={savingClosingNotes}
+                        onClick={async () => {
+                          setSavingClosingNotes(true)
+                          try {
+                            const res = await fetch(`/api/audits/${params.id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ closingMeetingNotes: closingNotesEdit.trim() || null }),
+                            })
+                            if (res.ok) fetchAudit()
+                          } finally {
+                            setSavingClosingNotes(false)
+                          }
+                        }}
+                      >
+                        {savingClosingNotes ? 'Saving...' : 'Save notes'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{audit.closingMeetingNotes || '—'}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Attendance</p>
+                  <MeetingAttendanceList
+                    auditId={params.id as string}
+                    meetingType="CLOSING"
+                    attendance={closingAttendance}
+                    canEdit={canEditAudit}
+                    onRefresh={fetchClosingAttendance}
+                    meId={me?.id}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          )}
 
           {!isERP && (
           <TabsContent value="checklist" className="space-y-4">
@@ -831,6 +1162,85 @@ const AuditDetailPage = () => {
             </div>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reschedule audit</DialogTitle>
+              <DialogDescription>
+                Update audit period and opening/closing meeting times.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="reschedule-startDate">Start date</Label>
+                  <Input
+                    id="reschedule-startDate"
+                    type="date"
+                    value={rescheduleForm.startDate}
+                    onChange={(e) =>
+                      setRescheduleForm((f) => ({ ...f, startDate: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reschedule-endDate">End date</Label>
+                  <Input
+                    id="reschedule-endDate"
+                    type="date"
+                    value={rescheduleForm.endDate}
+                    onChange={(e) =>
+                      setRescheduleForm((f) => ({ ...f, endDate: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reschedule-opening">Opening meeting</Label>
+                <Input
+                  id="reschedule-opening"
+                  type="datetime-local"
+                  value={rescheduleForm.openingMeetingAt}
+                  onChange={(e) =>
+                    setRescheduleForm((f) => ({ ...f, openingMeetingAt: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reschedule-closing">Closing meeting</Label>
+                <Input
+                  id="reschedule-closing"
+                  type="datetime-local"
+                  value={rescheduleForm.closingMeetingAt}
+                  onChange={(e) =>
+                    setRescheduleForm((f) => ({ ...f, closingMeetingAt: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reschedule-notes">Schedule notes</Label>
+                <Textarea
+                  id="reschedule-notes"
+                  value={rescheduleForm.scheduleNotes}
+                  onChange={(e) =>
+                    setRescheduleForm((f) => ({ ...f, scheduleNotes: e.target.value }))
+                  }
+                  placeholder="Process steps, agenda..."
+                  className="min-h-[80px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setRescheduleOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleRescheduleSubmit} disabled={savingReschedule}>
+                  {savingReschedule ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </MainLayout>
   )

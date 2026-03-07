@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
@@ -131,7 +132,16 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { status, ...updateData } = body
+    const {
+      status,
+      checklistId,
+      openingMeetingAt,
+      closingMeetingAt,
+      scheduleNotes,
+      closingMeetingNotes,
+      startDate,
+      endDate,
+    } = body
 
     if (status === 'ACTIVE') {
       const { data: auditCheck, error: checkError } = await supabase
@@ -148,12 +158,34 @@ export async function PATCH(
       }
     }
 
+    const updatePayload: Record<string, unknown> = {}
+    if (status != null) updatePayload.status = status
+    if (checklistId !== undefined) updatePayload.checklistId = checklistId || null
+    if (openingMeetingAt !== undefined) updatePayload.openingMeetingAt = openingMeetingAt ? new Date(openingMeetingAt).toISOString() : null
+    if (closingMeetingAt !== undefined) updatePayload.closingMeetingAt = closingMeetingAt ? new Date(closingMeetingAt).toISOString() : null
+    if (scheduleNotes !== undefined) updatePayload.scheduleNotes = scheduleNotes ?? null
+    if (closingMeetingNotes !== undefined) updatePayload.closingMeetingNotes = closingMeetingNotes ?? null
+    if (startDate !== undefined) updatePayload.startDate = startDate ? new Date(startDate).toISOString() : null
+    if (endDate !== undefined) {
+      const end = endDate ? new Date(endDate) : null
+      if (end && updatePayload.startDate && new Date(updatePayload.startDate as string) > end) {
+        return NextResponse.json(
+          { error: 'End date must be on or after start date' },
+          { status: 400 }
+        )
+      }
+      updatePayload.endDate = end ? end.toISOString() : null
+    }
+
+    const { data: auditBefore } = await supabase
+      .from('Audit')
+      .select('startDate, endDate, title')
+      .eq('id', params.id)
+      .single()
+
     const { data: audit, error: updateError } = await supabase
       .from('Audit')
-      .update({
-        ...updateData,
-        ...(status && { status }),
-      })
+      .update(updatePayload)
       .eq('id', params.id)
       .select(
         `
@@ -183,14 +215,43 @@ export async function PATCH(
       )
     }
 
+    const isReschedule =
+      (startDate != null || endDate != null) &&
+      auditBefore &&
+      (String(audit.startDate) !== String(auditBefore.startDate) ||
+        String(audit.endDate) !== String(auditBefore.endDate))
+
     await createActivityLog({
       userId: user.id,
       action: 'UPDATE',
       entityType: 'Audit',
       entityId: audit.id,
-      details: `Updated audit: ${audit.title}`,
+      details: isReschedule
+        ? `Rescheduled audit: ${audit.title}`
+        : `Updated audit: ${audit.title}`,
       auditId: audit.id,
     })
+
+    if (isReschedule) {
+      const { data: auditeeRows } = await supabase
+        .from('AuditAuditee')
+        .select('userId')
+        .eq('auditId', params.id)
+      const auditeeUserIds = (auditeeRows ?? [])
+        .map((r: { userId: string | null }) => r.userId)
+        .filter(Boolean) as string[]
+      for (const uid of auditeeUserIds) {
+        await supabase.from('Notification').insert({
+          id: randomUUID(),
+          userId: uid,
+          type: 'AUDIT_REMINDER',
+          title: 'Audit rescheduled',
+          message: `Audit "${audit.title}" has been rescheduled. Please check the new dates.`,
+          link: `/audits/${audit.id}`,
+          auditId: audit.id,
+        })
+      }
+    }
 
     return NextResponse.json(audit)
   } catch (error) {

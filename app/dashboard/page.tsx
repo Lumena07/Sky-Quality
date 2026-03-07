@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { exportDashboardStatsToExcel } from '@/lib/export/excel'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
-import { isNormalUser } from '@/lib/permissions'
+import { isNormalUser, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
 
 const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   AUDIT_SCHEDULED: 'Audit scheduled',
@@ -20,6 +20,7 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   DOCUMENT_APPROVAL: 'Document approval',
   TRAINING_EXPIRY: 'Training expiry',
   SYSTEM_ALERT: 'System alert',
+  ESCALATION_TO_AM: 'Escalation to AM',
 }
 
 type NotificationRow = {
@@ -133,7 +134,8 @@ const DashboardPage = () => {
   }, [roles])
 
   const isNormal = roles !== null && isNormalUser(roles)
-  const showAdminDashboard = roles !== null && !isNormalUser(roles)
+  const showAdminDashboard =
+    roles !== null && (canSeeAmDashboard(roles) || hasReviewerRole(roles))
 
   const handleExportStats = () => {
     exportDashboardStatsToExcel(stats)
@@ -144,6 +146,7 @@ const DashboardPage = () => {
     { title: 'Active Audits', value: stats.activeAudits, icon: Clock, href: '/audits?status=ACTIVE', color: 'text-orange-600' },
     { title: 'Open Findings', value: stats.openFindings, icon: AlertCircle, href: '/findings?status=OPEN', color: 'text-red-600' },
     { title: 'Overdue CAPs', value: stats.overdueCAPs, icon: TrendingUp, href: '/findings?overdue=true', color: 'text-purple-600' },
+    { title: 'Needs Follow-up', value: '—', icon: AlertCircle, href: '/findings?needsFollowUp=true', color: 'text-amber-600' },
     { title: 'Pending Documents', value: stats.pendingDocuments, icon: FileCheck, href: '/documents?status=REVIEW', color: 'text-yellow-600' },
   ]
 

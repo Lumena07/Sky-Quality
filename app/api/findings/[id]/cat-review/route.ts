@@ -42,7 +42,7 @@ export async function PATCH(
 
     const { data: ca, error: fetchError } = await supabase
       .from('CorrectiveAction')
-      .select('id')
+      .select('id, capStatus')
       .eq('findingId', findingId)
       .single()
 
@@ -51,6 +51,33 @@ export async function PATCH(
         { error: 'Corrective action not found for this finding' },
         { status: 404 }
       )
+    }
+
+    if (approved) {
+      const { data: findingRowForValidation } = await supabase
+        .from('Finding')
+        .select('rootCause, rootCauseStatus')
+        .eq('id', findingId)
+        .single()
+
+      const rootCause = (findingRowForValidation as { rootCause?: string | null } | null)?.rootCause
+      const rootCauseStatus = (findingRowForValidation as { rootCauseStatus?: string | null } | null)?.rootCauseStatus
+      const capStatus = (ca as { capStatus?: string | null }).capStatus
+
+      const rootCauseMissing = rootCause == null || String(rootCause).trim() === ''
+      const rootCauseNotApproved = rootCauseStatus !== 'APPROVED'
+      const capNotApproved = capStatus !== 'APPROVED'
+
+      if (rootCauseMissing || rootCauseNotApproved || capNotApproved) {
+        const reasons: string[] = []
+        if (rootCauseMissing) reasons.push('root cause must be set')
+        if (rootCauseNotApproved) reasons.push('root cause must be approved')
+        if (capNotApproved) reasons.push('Corrective Action Plan must be approved')
+        return NextResponse.json(
+          { error: `Root cause and CAP must be set and approved before closing. Missing: ${reasons.join('; ')}.` },
+          { status: 400 }
+        )
+      }
     }
 
     const now = new Date().toISOString()
