@@ -23,7 +23,7 @@ const requireQualityManager = async () => {
 export async function GET(request: Request) {
   const { error, supabase } = await requireQualityManager()
   if (error) return error
-  const group = request.nextUrl.searchParams.get('group')
+  const group = new URL(request.url).searchParams.get('group')
   try {
     let q = supabase!
       .from('FindingClassification')

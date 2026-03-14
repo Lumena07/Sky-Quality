@@ -77,7 +77,7 @@ export async function GET() {
         .eq('status', 'PENDING')
         .order('requestedAt', { ascending: false })
         .limit(50)
-      pendingRescheduleRequests = (rescheduleData ?? []) as typeof pendingRescheduleRequests
+      pendingRescheduleRequests = (rescheduleData ?? []) as unknown as typeof pendingRescheduleRequests
     } catch {
       // Table may not exist yet
     }

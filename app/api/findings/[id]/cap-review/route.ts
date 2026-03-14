@@ -94,13 +94,13 @@ export async function PATCH(
       )
     }
 
-    const { data: findingRow } = await supabase
+    const { data: findingForNotify } = await supabase
       .from('Finding')
       .select('id, findingNumber, assignedToId')
       .eq('id', findingId)
       .single()
-    const assignedToId = findingRow && (findingRow as { assignedToId?: string }).assignedToId
-    const findingNumber = (findingRow as { findingNumber?: string })?.findingNumber ?? findingId
+    const assignedToId = findingForNotify && (findingForNotify as { assignedToId?: string }).assignedToId
+    const findingNumber = (findingForNotify as { findingNumber?: string })?.findingNumber ?? findingId
     if (assignedToId) {
       if (approved) {
         await supabase.from('Notification').insert({

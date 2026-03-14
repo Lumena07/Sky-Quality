@@ -23,8 +23,9 @@ const requireQualityManager = async () => {
 export async function GET(request: Request) {
   const { error, supabase } = await requireQualityManager()
   if (error) return error
-  const from = request.nextUrl.searchParams.get('from')
-  const to = request.nextUrl.searchParams.get('to')
+  const searchParams = new URL(request.url).searchParams
+  const from = searchParams.get('from')
+  const to = searchParams.get('to')
   try {
     let q = supabase!
       .from('RegulatoryViolation')

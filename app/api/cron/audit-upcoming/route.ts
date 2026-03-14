@@ -86,7 +86,7 @@ export async function GET(request: Request) {
         if (uid) userIds.add(uid)
       }
 
-      for (const uid of userIds) {
+      for (const uid of Array.from(userIds)) {
         notifications.push({
           id: randomUUID(),
           userId: uid,

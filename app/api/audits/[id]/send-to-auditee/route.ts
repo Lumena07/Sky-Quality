@@ -74,12 +74,12 @@ export async function POST(
       )
     }
 
-    const { data: auditeeRows } = await supabase
+    const { data: auditeeRowsForNotify } = await supabase
       .from('AuditAuditee')
       .select('userId, name, email')
       .eq('auditId', params.id)
 
-    const auditees = auditeeRows ?? []
+    const auditees = auditeeRowsForNotify ?? []
     const userIds = auditees
       .map((a: { userId: string | null }) => a.userId)
       .filter(Boolean) as string[]

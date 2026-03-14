@@ -840,7 +840,7 @@ const AuditDetailPage = () => {
                     auditId={params.id as string}
                     meetingType="OPENING"
                     attendance={openingAttendance}
-                    canEdit={canEditAuditValue}
+                    canEdit={!!canEditAuditValue}
                     onRefresh={fetchOpeningAttendance}
                     meId={me?.id}
                   />
@@ -932,7 +932,7 @@ const AuditDetailPage = () => {
                     auditId={params.id as string}
                     meetingType="CLOSING"
                     attendance={closingAttendance}
-                    canEdit={canEditAuditValue}
+                    canEdit={!!canEditAuditValue}
                     onRefresh={fetchClosingAttendance}
                     meId={me?.id}
                   />

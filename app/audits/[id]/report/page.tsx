@@ -1,5 +1,6 @@
 'use client'
 
+/// <reference path="../../../../html2pdf.d.ts" />
 import { useParams, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
