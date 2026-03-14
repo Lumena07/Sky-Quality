@@ -16,7 +16,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/admin') ||
     pathname.startsWith('/activity-log') ||
     pathname.startsWith('/training') ||
-    pathname.startsWith('/change-password')
+    pathname.startsWith('/change-password') ||
+    pathname.startsWith('/user-guide')
 
   const accessToken =
     request.cookies.get('sb-access-token')?.value ??
@@ -32,5 +33,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password'],
+  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password', '/user-guide'],
 }

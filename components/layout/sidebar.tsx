@@ -9,22 +9,6 @@ const ROLES_STORAGE_KEY = 'sq_sidebar_roles'
 const DEPT_STORAGE_KEY = 'sq_sidebar_departmentId'
 const NAVIGATING_KEY = 'sq_sidebar_navigating'
 
-const getStoredRoles = (): string[] | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = sessionStorage.getItem(ROLES_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-const getStoredDepartmentId = (): string | null => {
-  if (typeof window === 'undefined') return null
-  return sessionStorage.getItem(DEPT_STORAGE_KEY)
-}
 import {
   LayoutDashboard,
   Calendar,
@@ -40,8 +24,10 @@ import {
   TrendingUp,
   BookOpen,
   Target,
+  HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useSidebarRoles } from '@/components/providers/sidebar-roles-provider'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
 import { isAdminOrQM, isAuditorOnly, isNormalUser, isFocalPersonOnly, canSeeAmDashboard, isAccountableManager, canSeeTraining, canViewAuditPlan, canViewActivityLog } from '@/lib/permissions'
 
@@ -65,17 +51,10 @@ const allMenuItems = [
 export const Sidebar = () => {
   const pathname = usePathname()
   const router = useRouter()
-  const [roles, setRoles] = useState<string[] | null>(() => getStoredRoles())
-  const [departmentId, setDepartmentId] = useState<string | null>(() => getStoredDepartmentId())
-  const [navigating, setNavigating] = useState(() => {
-    if (typeof window === 'undefined') return false
-    const was = sessionStorage.getItem(NAVIGATING_KEY)
-    if (was) {
-      sessionStorage.removeItem(NAVIGATING_KEY)
-      return true
-    }
-    return false
-  })
+  const { initialRoles: contextRoles, initialDepartmentId: contextDepartmentId } = useSidebarRoles()
+  const [roles, setRoles] = useState<string[] | null>(contextRoles ?? null)
+  const [departmentId, setDepartmentId] = useState<string | null>(contextDepartmentId ?? null)
+  const [navigating, setNavigating] = useState(false)
   useEffect(() => {
     if (!pathname) return
     const id = setTimeout(() => setNavigating(false), 600)
@@ -93,6 +72,15 @@ export const Sidebar = () => {
   }
 
   useEffect(() => {
+    try {
+      const was = sessionStorage.getItem(NAVIGATING_KEY)
+      if (was) {
+        sessionStorage.removeItem(NAVIGATING_KEY)
+        setNavigating(true)
+      }
+    } catch {
+      // ignore
+    }
     let cancelled = false
     const fetchMe = async () => {
       try {
@@ -218,6 +206,31 @@ export const Sidebar = () => {
         })}
       </nav>
       <div className="border-t p-4 space-y-1">
+        <Link
+          href="/user-guide"
+          onClick={(e) => {
+            if (navigating) {
+              e.preventDefault()
+              e.stopPropagation()
+              return
+            }
+            handleNavClick()
+          }}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            pathname?.startsWith('/user-guide')
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+            navigating && 'cursor-not-allowed opacity-50'
+          )}
+          style={navigating ? { pointerEvents: 'none' } : undefined}
+          aria-label="User guide"
+          aria-disabled={navigating}
+          tabIndex={navigating ? -1 : undefined}
+        >
+          <HelpCircle className="h-5 w-5" />
+          User guide
+        </Link>
         <Link
           href="/change-password"
           onClick={(e) => {
