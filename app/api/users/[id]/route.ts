@@ -20,7 +20,6 @@ export async function PATCH(
     const body = await request.json()
 
     const validRoles = [
-      'SYSTEM_ADMIN',
       'QUALITY_MANAGER',
       'ACCOUNTABLE_MANAGER',
       'AUDITOR',

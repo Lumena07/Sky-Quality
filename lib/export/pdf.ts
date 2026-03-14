@@ -1,126 +1,205 @@
 import jsPDF from 'jspdf'
 
+export interface FindingReport {
+  findingNumber: string
+  description: string
+  priority?: string | null
+}
+
+export interface ExecutiveSummaryReport {
+  overallResult: string
+  checklistItemsReviewed: number
+  numberOfFindings: number
+  complianceSummary: string
+  compliantCount?: number
+  nonCompliantCount?: number
+  notReviewedCount?: number
+}
+
+export interface ChecklistItemReport {
+  ref?: string | null
+  content: string
+  documentedImplementedLabel: string
+  compliance: 'Compliant' | 'Non-Compliant' | 'Not reviewed'
+  objectiveEvidence?: string | null
+  findings?: FindingReport[]
+}
+
 export interface AuditReportData {
   auditNumber: string
   title: string
+  reportTitle: string
+  auditDate: string
   department: string
   base: string
-  scheduledDate: string
-  status: string
   scope: string
   description?: string
   auditors: string[]
   auditees: string[]
+  executiveSummary: ExecutiveSummaryReport
+  conclusion?: string
+  generatedDate: string
+  checklistItems?: ChecklistItemReport[]
   findings?: {
     findingNumber: string
     description: string
     severity: string
-    status: string
   }[]
 }
 
+const SECTION_SPACING = 4
+const LINE_HEIGHT = 6
+const MARGIN = 20
+const PAGE_TOP = 20
+const PAGE_BREAK_Y = 270
+const BODY_FONT_SIZE = 10
+const HEADING_FONT_SIZE = 12
+const TITLE_FONT_SIZE = 18
+
 export const generateAuditReportPDF = (data: AuditReportData): jsPDF => {
   const doc = new jsPDF()
-  let yPosition = 20
+  let yPosition = PAGE_TOP
 
-  // Header
-  doc.setFontSize(20)
-  doc.setFont('helvetica', 'bold')
-  doc.text('AUDIT REPORT', 105, yPosition, { align: 'center' })
-  yPosition += 10
-
-  doc.setFontSize(12)
-  doc.setFont('helvetica', 'normal')
-  doc.text(`Audit Number: ${data.auditNumber}`, 20, yPosition)
-  yPosition += 7
-
-  // Audit Details
-  doc.setFont('helvetica', 'bold')
-  doc.text('Audit Details', 20, yPosition)
-  yPosition += 7
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.text(`Title: ${data.title}`, 20, yPosition)
-  yPosition += 6
-  doc.text(`Department: ${data.department}`, 20, yPosition)
-  yPosition += 6
-  doc.text(`Base/Location: ${data.base}`, 20, yPosition)
-  yPosition += 6
-  doc.text(`Scheduled Date: ${data.scheduledDate}`, 20, yPosition)
-  yPosition += 6
-  doc.text(`Status: ${data.status}`, 20, yPosition)
-  yPosition += 10
-
-  // Scope
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.text('Scope', 20, yPosition)
-  yPosition += 7
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  const scopeLines = doc.splitTextToSize(data.scope, 170)
-  doc.text(scopeLines, 20, yPosition)
-  yPosition += scopeLines.length * 6 + 5
-
-  // Description
-  if (data.description) {
+  const drawSectionHeading = (title: string) => {
+    if (yPosition > PAGE_BREAK_Y) {
+      doc.addPage()
+      yPosition = PAGE_TOP
+    }
+    doc.setFontSize(HEADING_FONT_SIZE)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Description', 20, yPosition)
-    yPosition += 7
-
+    doc.text(title, MARGIN, yPosition)
+    yPosition += LINE_HEIGHT + 2
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    const descLines = doc.splitTextToSize(data.description, 170)
-    doc.text(descLines, 20, yPosition)
-    yPosition += descLines.length * 6 + 5
+    doc.setFontSize(BODY_FONT_SIZE)
   }
 
-  // Team
+  // Report title: [Audit Name] Audit Report
+  const reportTitle = data.reportTitle ?? `${data.title} Audit Report`
+  doc.setFontSize(TITLE_FONT_SIZE)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.text('Audit Team', 20, yPosition)
-  yPosition += 7
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.text(`Auditors: ${data.auditors.join(', ')}`, 20, yPosition)
-  yPosition += 6
-  doc.text(`Auditees: ${data.auditees.join(', ')}`, 20, yPosition)
+  const titleLines = doc.splitTextToSize(reportTitle, 170)
+  doc.text(titleLines, 105, yPosition, { align: 'center' })
+  yPosition += titleLines.length * LINE_HEIGHT + 6
+  doc.setDrawColor(200, 200, 200)
+  doc.line(MARGIN, yPosition, 190, yPosition)
   yPosition += 10
 
-  // Findings
-  if (data.findings && data.findings.length > 0) {
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Findings', 20, yPosition)
-    yPosition += 7
+  // 1. Audit Details (no scheduled date; audit date = start date)
+  drawSectionHeading('1. Audit Details')
+  doc.text(`Audit Number: ${data.auditNumber}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT
+  doc.text(`Audit Date: ${data.auditDate}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT
+  doc.text(`Department: ${data.department}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT
+  doc.text(`Base/Location: ${data.base}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT + SECTION_SPACING
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    data.findings.forEach((finding, index) => {
-      if (yPosition > 270) {
+  // 2. Scope
+  drawSectionHeading('2. Scope')
+  const scopeLines = doc.splitTextToSize(data.scope, 170)
+  doc.text(scopeLines, MARGIN, yPosition)
+  yPosition += scopeLines.length * LINE_HEIGHT + SECTION_SPACING
+
+  // 3. Audit Team
+  drawSectionHeading('3. Audit Team')
+  doc.text(`Auditors: ${data.auditors.join(', ')}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT
+  doc.text(`Auditees: ${data.auditees.join(', ')}`, MARGIN, yPosition)
+  yPosition += LINE_HEIGHT + SECTION_SPACING
+
+  // 4. Executive Summary
+  const summary = data.executiveSummary
+  if (summary) {
+    drawSectionHeading('4. Executive Summary')
+    doc.text(`Overall Result: ${summary.overallResult}`, MARGIN, yPosition)
+    yPosition += LINE_HEIGHT
+    doc.text(`Number of Checklist Items Reviewed: ${summary.checklistItemsReviewed}`, MARGIN, yPosition)
+    yPosition += LINE_HEIGHT
+    doc.text(`Number of Findings: ${summary.numberOfFindings}`, MARGIN, yPosition)
+    yPosition += LINE_HEIGHT
+    const summaryLines = doc.splitTextToSize(summary.complianceSummary, 170)
+    doc.text(summaryLines, MARGIN, yPosition)
+    yPosition += summaryLines.length * LINE_HEIGHT + SECTION_SPACING
+  }
+
+  // 5. Checklist Items
+  if (data.checklistItems && data.checklistItems.length > 0) {
+    drawSectionHeading('5. Checklist Items')
+    data.checklistItems.forEach((item, index) => {
+      if (yPosition > PAGE_BREAK_Y) {
         doc.addPage()
-        yPosition = 20
+        yPosition = PAGE_TOP
       }
 
+      // Item number
       doc.setFont('helvetica', 'bold')
-      doc.text(`${index + 1}. ${finding.findingNumber} (${finding.severity})`, 20, yPosition)
-      yPosition += 6
+      doc.text(`Item ${index + 1}`, MARGIN, yPosition)
+      yPosition += LINE_HEIGHT
 
+      // Ref
       doc.setFont('helvetica', 'normal')
-      const findingLines = doc.splitTextToSize(finding.description, 170)
-      doc.text(findingLines, 20, yPosition)
-      yPosition += findingLines.length * 6 + 3
-      doc.text(`Status: ${finding.status}`, 20, yPosition)
-      yPosition += 8
+      doc.text(`Ref: ${item.ref ?? '—'}`, MARGIN, yPosition)
+      yPosition += LINE_HEIGHT
+
+      // Audit question
+      doc.setFont('helvetica', 'bold')
+      doc.text('Audit question:', MARGIN, yPosition)
+      yPosition += LINE_HEIGHT
+      doc.setFont('helvetica', 'normal')
+      const questionLines = doc.splitTextToSize(item.content, 170)
+      doc.text(questionLines, MARGIN, yPosition)
+      yPosition += questionLines.length * LINE_HEIGHT
+
+      // Category (documented/implemented status)
+      doc.text(`Category: ${item.documentedImplementedLabel}`, MARGIN, yPosition)
+      yPosition += LINE_HEIGHT
+      doc.text(`Compliance: ${item.compliance}`, MARGIN, yPosition)
+      yPosition += LINE_HEIGHT
+
+      if (item.compliance === 'Compliant') {
+        const evidenceText = (item.objectiveEvidence ?? '').trim() || '—'
+        doc.text('Objective Evidence:', MARGIN, yPosition)
+        yPosition += LINE_HEIGHT
+        const evidenceLines = doc.splitTextToSize(evidenceText, 165)
+        doc.text(evidenceLines, MARGIN + 5, yPosition)
+        yPosition += evidenceLines.length * LINE_HEIGHT
+      } else if (item.compliance === 'Non-Compliant' && item.findings && item.findings.length > 0) {
+        doc.text('Findings:', MARGIN, yPosition)
+        yPosition += LINE_HEIGHT
+        item.findings.forEach((f) => {
+          if (yPosition > PAGE_BREAK_Y) {
+            doc.addPage()
+            yPosition = PAGE_TOP
+          }
+          const priorityLabel = f.priority ?? '—'
+          doc.setFont('helvetica', 'bold')
+          doc.text(`  • ${f.findingNumber} (${priorityLabel})`, MARGIN, yPosition)
+          yPosition += LINE_HEIGHT
+          doc.setFont('helvetica', 'normal')
+          const fLines = doc.splitTextToSize(f.description ?? '', 165)
+          doc.text(fLines, MARGIN + 5, yPosition)
+          yPosition += fLines.length * LINE_HEIGHT + 3
+        })
+        yPosition += 3
+      }
+
+      yPosition += SECTION_SPACING
     })
+    yPosition += SECTION_SPACING
+  }
+
+  // 6. Conclusion
+  if (data.conclusion && data.conclusion.trim()) {
+    drawSectionHeading('6. Conclusion')
+    const conclusionLines = doc.splitTextToSize(data.conclusion, 170)
+    doc.text(conclusionLines, MARGIN, yPosition)
+    yPosition += conclusionLines.length * LINE_HEIGHT + SECTION_SPACING
   }
 
   // Footer
   const pageCount = doc.getNumberOfPages()
+  const generatedDate = data.generatedDate ?? new Date().toLocaleDateString()
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
     doc.setFontSize(8)
@@ -131,7 +210,7 @@ export const generateAuditReportPDF = (data: AuditReportData): jsPDF => {
       { align: 'center' }
     )
     doc.text(
-      `Generated on ${new Date().toLocaleDateString()}`,
+      `Generated on ${generatedDate}`,
       105,
       290,
       { align: 'center' }

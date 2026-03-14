@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { generateAuditNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, canScheduleAudit } from '@/lib/permissions'
 
 export async function GET(request: Request) {
   try {
@@ -77,6 +78,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    if (!canScheduleAudit(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can schedule audits. Accountable Manager cannot schedule audits.' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const {
       title,
@@ -94,6 +103,7 @@ export async function POST(request: Request) {
       auditorIds = [],
       auditeeIds = [],
       externalAuditees = [],
+      auditPlanId,
     } = body
 
     const externalAuditeeUserIds = (externalAuditees as { userId?: string }[])
@@ -121,27 +131,31 @@ export async function POST(request: Request) {
       )
     }
     const now = new Date().toISOString()
+    const insertPayload: Record<string, unknown> = {
+      id: randomUUID(),
+      auditNumber: generateAuditNumber(),
+      title,
+      description,
+      scope,
+      departmentId,
+      base,
+      scheduledDate: start.toISOString(),
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      status: 'PLANNED',
+      type: type || 'INTERNAL',
+      openingMeetingAt: openingMeetingAt ? new Date(openingMeetingAt).toISOString() : null,
+      closingMeetingAt: closingMeetingAt ? new Date(closingMeetingAt).toISOString() : null,
+      scheduleNotes: scheduleNotes ?? null,
+      createdById: user.id,
+      updatedAt: now,
+    }
+    if (auditPlanId && typeof auditPlanId === 'string' && auditPlanId.trim()) {
+      insertPayload.auditPlanId = auditPlanId.trim()
+    }
     const { data: auditInsert, error: auditError } = await supabase
       .from('Audit')
-      .insert({
-        id: randomUUID(),
-        auditNumber: generateAuditNumber(),
-        title,
-        description,
-        scope,
-        departmentId,
-        base,
-        scheduledDate: start.toISOString(),
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        status: 'PLANNED',
-        type: type || 'INTERNAL',
-        openingMeetingAt: openingMeetingAt ? new Date(openingMeetingAt).toISOString() : null,
-        closingMeetingAt: closingMeetingAt ? new Date(closingMeetingAt).toISOString() : null,
-        scheduleNotes: scheduleNotes ?? null,
-        createdById: user.id,
-        updatedAt: now,
-      })
+      .insert(insertPayload)
       .select('id')
       .single()
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserRoles, canReviewFinding } from '@/lib/permissions'
+import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
 
 /** Approve or reject Corrective Action Plan (CAP). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -22,12 +22,30 @@ export async function PATCH(
     const roles = await getCurrentUserRoles(supabase, user.id)
     if (!canReviewFinding(roles)) {
       return NextResponse.json(
-        { error: 'Only auditors, quality managers, and system admins can review CAP' },
+        { error: 'Only auditors or quality managers can review CAP' },
         { status: 403 }
       )
     }
 
     const { id: findingId } = await params
+
+    const { data: findingRow, error: findingErr } = await supabase
+      .from('Finding')
+      .select('auditId')
+      .eq('id', findingId)
+      .single()
+    if (findingErr || !findingRow) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
+    }
+    const auditId = (findingRow as { auditId: string }).auditId
+    const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
+    if (!canReview) {
+      return NextResponse.json(
+        { error: 'Only auditors assigned to this audit or Quality Manager can review CAP' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const approved = body.approved === true
     const rejectionReason =

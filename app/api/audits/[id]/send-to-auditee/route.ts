@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile } from '@/lib/permissions'
+import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
 
 export async function POST(
   request: Request,
@@ -19,27 +19,28 @@ export async function POST(
     }
 
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    const auditorIds = await (async () => {
-      const { data } = await supabase
-        .from('AuditAuditor')
-        .select('userId')
-        .eq('auditId', params.id)
-      return (data ?? []).map((r: { userId: string }) => r.userId)
-    })()
-    const canSend =
-      roles.some((r) => r === 'SYSTEM_ADMIN' || r === 'QUALITY_MANAGER') ||
-      auditorIds.includes(user.id)
-
-    if (!canSend) {
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
       return NextResponse.json(
-        { error: 'Only auditors or QM/Admin can send checklist and schedule to auditees' },
+        { error: 'Only Quality Manager or auditors assigned to this audit can send checklist and schedule to auditees' },
         { status: 403 }
       )
     }
 
     const { data: audit, error: auditError } = await supabase
       .from('Audit')
-      .select('id, title, status')
+      .select('id, title, status, checklistId, openingMeetingAt, closingMeetingAt, ScheduleItems:AuditScheduleItem(id)')
       .eq('id', params.id)
       .single()
 
@@ -50,6 +51,25 @@ export async function POST(
     if (audit.status !== 'PLANNED' && audit.status !== 'ACTIVE') {
       return NextResponse.json(
         { error: 'Checklist and schedule can only be sent for planned or active audits' },
+        { status: 400 }
+      )
+    }
+
+    if (!audit.checklistId) {
+      return NextResponse.json(
+        { error: 'Select a checklist before sending to auditees.' },
+        { status: 400 }
+      )
+    }
+
+    const scheduleItems = (audit as { ScheduleItems?: { id: string }[] }).ScheduleItems ?? []
+    const hasSchedule =
+      !!audit.openingMeetingAt ||
+      !!audit.closingMeetingAt ||
+      (Array.isArray(scheduleItems) && scheduleItems.length > 0)
+    if (!hasSchedule) {
+      return NextResponse.json(
+        { error: 'Add audit schedule details before sending to auditees.' },
         { status: 400 }
       )
     }
@@ -86,6 +106,18 @@ export async function POST(
           { status: 500 }
         )
       }
+    }
+
+    const { error: updateError } = await supabase
+      .from('Audit')
+      .update({ checklistScheduleSentAt: new Date().toISOString() })
+      .eq('id', params.id)
+    if (updateError) {
+      console.error('Error setting checklistScheduleSentAt:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to record send-to-auditee' },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({

@@ -1,6 +1,6 @@
-# Follow-up and CAP Timing (ICAO / Auric Air Manual)
+# Follow-up and CAP Timing (ICAO)
 
-This document describes how follow-up and Corrective Action Plan (CAP) timing are applied in Sky SQ QMS. Configure values to align with **ICAO** standards and your **Auric Air Manual**.
+This document describes how follow-up and Corrective Action Plan (CAP) timing are applied in Sky SQ QMS. Configure values to align with **ICAO** standards and your internal manual.
 
 ## Follow-up requirements
 
@@ -36,4 +36,4 @@ Run the job daily (e.g. via Vercel Cron calling `GET /api/cron/cap-notifications
 | `CAP_DUE_SOON_DAYS` | Number of days before due date to send "due soon" notification (default: 3). |
 | `CRON_SECRET` | Secret used to authorize the cron request to `/api/cron/cap-notifications`. |
 
-Refer to **ICAO** and the **Auric Air Manual** when setting timing and escalation thresholds.
+Refer to **ICAO** and your internal manual when setting timing and escalation thresholds.

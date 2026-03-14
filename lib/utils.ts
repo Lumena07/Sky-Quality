@@ -14,6 +14,17 @@ export const formatDate = (date: Date | string): string => {
   })
 }
 
+/** Format ISO or YYYY-MM-DD as date only (no time), so the calendar day never rolls over in other timezones. */
+export const formatDateOnly = (isoOrDateStr: string): string => {
+  const datePart = isoOrDateStr.slice(0, 10)
+  const [y, m, d] = datePart.split('-').map(Number)
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return isoOrDateStr
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const month = months[m - 1]
+  if (!month) return isoOrDateStr
+  return `${month} ${d}, ${y}`
+}
+
 export const formatDateTime = (date: Date | string): string => {
   const d = typeof date === 'string' ? new Date(date) : date
   return d.toLocaleString('en-US', { 

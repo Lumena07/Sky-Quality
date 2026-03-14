@@ -1,6 +1,25 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
+
+const DOCUMENTED_IMPLEMENTED_STATUS_VALUES = [
+  'DOCUMENTED_IMPLEMENTED',
+  'DOCUMENTED_NOT_IMPLEMENTED',
+  'NOT_DOCUMENTED_IMPLEMENTED',
+  'NOT_DOCUMENTED_NOT_IMPLEMENTED',
+] as const
+
+function parseDocumentedImplementedStatus(
+  value: unknown
+): (typeof DOCUMENTED_IMPLEMENTED_STATUS_VALUES)[number] | null {
+  if (value == null || value === '') return null
+  const s = String(value)
+  if (DOCUMENTED_IMPLEMENTED_STATUS_VALUES.includes(s as (typeof DOCUMENTED_IMPLEMENTED_STATUS_VALUES)[number])) {
+    return s as (typeof DOCUMENTED_IMPLEMENTED_STATUS_VALUES)[number]
+  }
+  return null
+}
 
 export async function GET(
   request: Request,
@@ -45,7 +64,7 @@ export async function GET(
 
     const { data: findings } = await supabase
       .from('Finding')
-      .select('id, findingNumber, checklistItemId, departmentId, description, priority, assignedToId, status')
+      .select('id, findingNumber, checklistItemId, departmentId, description, priority, assignedToId, status, policyReference')
       .eq('auditId', params.id)
       .not('checklistItemId', 'is', null)
 
@@ -96,8 +115,29 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors assigned to this audit can save checklist responses' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
-    const { checklistItemId, isCompliant, notes } = body
+    const { checklistItemId, isCompliant, notes, documentedImplementedStatus: rawStatus } = body
+    const documentedImplementedStatus = parseDocumentedImplementedStatus(rawStatus)
 
     if (!checklistItemId) {
       return NextResponse.json(
@@ -138,6 +178,7 @@ export async function POST(
           checklistItemId,
           isCompliant,
           notes: notes || null,
+          documentedImplementedStatus,
           reviewedById: user.id,
           updatedAt: now,
         })
@@ -158,6 +199,7 @@ export async function POST(
         .update({
           isCompliant,
           notes: notes || null,
+          documentedImplementedStatus,
           reviewedById: user.id,
           updatedAt: new Date().toISOString(),
         })

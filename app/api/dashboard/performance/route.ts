@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, canViewActivityLog } from '@/lib/permissions'
+import { getCurrentUserProfile, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
+import { computeKpis } from '@/lib/kpi-computation'
 
-/** GET: Performance dashboard data (trends, KPIs over time). Restricted to reviewers and AM/admin. */
+/** Can view Performance dashboard: reviewers (QM, auditors) or Accountable Manager. */
+const canViewPerformanceDashboard = (roles: string[]): boolean =>
+  canSeeAmDashboard(roles) || hasReviewerRole(roles)
+
+/** GET: Performance dashboard data (monthly KPIs + trends). Restricted to reviewers and AM. */
 export async function GET(request: Request) {
   try {
     const supabase = createSupabaseServerClient()
@@ -16,25 +21,135 @@ export async function GET(request: Request) {
     }
 
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    if (!canViewActivityLog(roles)) {
+    if (!canViewPerformanceDashboard(roles)) {
       return NextResponse.json(
-        { error: 'Only reviewers, Quality Manager, Accountable Manager, or System Admin can view performance dashboard' },
+        {
+          error:
+            'Only reviewers, Quality Manager, or Accountable Manager can view performance dashboard',
+        },
         { status: 403 }
       )
     }
 
     const { searchParams } = new URL(request.url)
+    const monthParam = searchParams.get('month')
+    const monthsParam = searchParams.get('months') ?? '12'
     const period = searchParams.get('period') ?? '30d'
+
+    const now = new Date()
+    const month =
+      monthParam && /^\d{4}-\d{2}$/.test(monthParam)
+        ? monthParam
+        : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const months = Math.min(24, Math.max(1, parseInt(monthsParam, 10) || 12))
+
     const days = period === '7d' ? 7 : period === '90d' ? 90 : 30
     const fromDate = new Date()
     fromDate.setDate(fromDate.getDate() - days)
     const fromIso = fromDate.toISOString()
 
+    // Fetch KPI definitions (active only); table may not exist before migrations
+    let definitions: Array<{
+      id: string
+      code: string | null
+      name: string
+      area: string | null
+      unit: string
+      direction: string
+      targetValue: number | null
+      isComputed: boolean
+    }> = []
+    try {
+      const { data: kpiDefs } = await supabase
+        .from('KpiDefinition')
+        .select('id, code, name, area, unit, direction, targetValue, isComputed, isActive')
+        .eq('isActive', true)
+      definitions = (kpiDefs ?? []) as typeof definitions
+    } catch {
+      // KpiDefinition table not yet migrated
+    }
+
+    const computedDefs = definitions.filter((d) => d.isComputed)
+    const manualDefs = definitions.filter((d) => !d.isComputed)
+
+    // Compute values for built-in KPIs
+    let computedResults: Array<{ code: string; currentValue: number; trend: Array<{ month: string; value: number }> }> = []
+    try {
+      computedResults = await computeKpis(supabase, month, months)
+    } catch (e) {
+      console.error('KPI computation error', e)
+    }
+
+    // Build trend month list (first day of each month for query)
+    const trendMonths: string[] = []
+    const [y, m] = month.split('-').map(Number)
+    for (let i = 0; i < months; i++) {
+      const d = new Date(Date.UTC(y, m - 1 - i, 1))
+      trendMonths.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`)
+    }
+
+    // Fetch manual KPI monthly values for the trend range
+    const manualKpiIds = manualDefs.map((d) => d.id)
+    const { data: monthlyValues } =
+      manualKpiIds.length > 0
+        ? await supabase
+            .from('KpiMonthlyValue')
+            .select('kpiDefinitionId, month, value')
+            .in('kpiDefinitionId', manualKpiIds)
+            .gte('month', trendMonths[trendMonths.length - 1])
+            .lte('month', trendMonths[0])
+        : { data: [] }
+
+    const valueMap = new Map<string, Map<string, number>>()
+    for (const row of (monthlyValues ?? []) as Array<{ kpiDefinitionId: string; month: string; value: number }>) {
+      const monthKey = row.month.slice(0, 7)
+      if (!valueMap.has(row.kpiDefinitionId)) valueMap.set(row.kpiDefinitionId, new Map())
+      valueMap.get(row.kpiDefinitionId)!.set(monthKey, Number(row.value))
+    }
+
+    const trendMonthKeys = trendMonths.map((d) => d.slice(0, 7))
+
+    const kpis = [
+      ...computedDefs.map((def) => {
+        const comp = computedResults.find((r) => r.code === def.code)
+        return {
+          id: def.id,
+          code: def.code,
+          name: def.name,
+          area: def.area,
+          unit: def.unit,
+          direction: def.direction,
+          targetValue: def.targetValue,
+          isComputed: true,
+          currentValue: comp?.currentValue ?? 0,
+          trend: comp?.trend ?? trendMonthKeys.map((mo) => ({ month: mo, value: 0 })),
+        }
+      }),
+      ...manualDefs.map((def) => {
+        const byMonth = valueMap.get(def.id)
+        const currentVal = byMonth?.get(month) ?? 0
+        return {
+          id: def.id,
+          code: def.code,
+          name: def.name,
+          area: def.area,
+          unit: def.unit,
+          direction: def.direction,
+          targetValue: def.targetValue,
+          isComputed: false,
+          currentValue: Number(currentVal),
+          trend: trendMonthKeys.map((mo) => ({ month: mo, value: Number(byMonth?.get(mo) ?? 0) })),
+        }
+      }),
+    ]
+
+    // Legacy summary stats (period-based)
     const [
       auditsCompletedResult,
       findingsClosedResult,
       findingsOpenedResult,
       overdueAtEndResult,
+      overdueCatNowResult,
     ] = await Promise.all([
       supabase
         .from('Audit')
@@ -54,14 +169,17 @@ export async function GET(request: Request) {
       supabase
         .from('CorrectiveAction')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['OPEN', 'IN_PROGRESS'])
+        .eq('status', 'OPEN')
         .lt('dueDate', new Date().toISOString()),
+      supabase
+        .from('CorrectiveAction')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'OPEN')
+        .not('catDueDate', 'is', null)
+        .lt('catDueDate', new Date().toISOString())
+        .neq('catStatus', 'APPROVED')
+        .is('completionDate', null),
     ])
-
-    const auditsCompleted = auditsCompletedResult.count ?? 0
-    const findingsClosed = findingsClosedResult.count ?? 0
-    const findingsOpened = findingsOpenedResult.count ?? 0
-    const overdueCAPsNow = overdueAtEndResult.count ?? 0
 
     const { data: byDepartment } = await supabase
       .from('Finding')
@@ -70,7 +188,11 @@ export async function GET(request: Request) {
 
     const deptOpen: Record<string, { name: string; open: number; closed: number }> = {}
     for (const row of byDepartment ?? []) {
-      const d = row as { departmentId: string; status: string; Department?: { name: string } | Array<{ name: string }> }
+      const d = row as {
+        departmentId: string
+        status: string
+        Department?: { name: string } | Array<{ name: string }>
+      }
       const id = d.departmentId
       const name = Array.isArray(d.Department) ? d.Department[0]?.name : d.Department?.name
       if (!deptOpen[id]) deptOpen[id] = { name: name ?? id, open: 0, closed: 0 }
@@ -79,13 +201,17 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
+      month,
+      months,
+      kpis,
       period,
       days,
       fromDate: fromIso,
-      auditsCompleted,
-      findingsClosed,
-      findingsOpened,
-      overdueCAPsNow,
+      auditsCompleted: auditsCompletedResult.count ?? 0,
+      findingsClosed: findingsClosedResult.count ?? 0,
+      findingsOpened: findingsOpenedResult.count ?? 0,
+      overdueCAPsNow: overdueAtEndResult.count ?? 0,
+      overdueCATsNow: overdueCatNowResult.count ?? 0,
       byDepartment: Object.entries(deptOpen).map(([id, v]) => ({
         departmentId: id,
         departmentName: v.name,

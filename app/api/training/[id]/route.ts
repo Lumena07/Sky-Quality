@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, hasReviewerRole, canSeeAmDashboard } from '@/lib/permissions'
+import { getCurrentUserProfile, hasReviewerRole, canSeeAmDashboard, canSeeTraining, canAddTraining } from '@/lib/permissions'
 
 /** GET: Single training record. Owner or reviewers/AM. */
 export async function GET(
@@ -34,7 +34,13 @@ export async function GET(
       return NextResponse.json({ error: 'Training record not found' }, { status: 404 })
     }
 
-    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
+    if (!canSeeTraining(roles, departmentId)) {
+      return NextResponse.json(
+        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { status: 403 }
+      )
+    }
     const ownerId = (record as { userId: string }).userId
     if (ownerId !== user.id && !hasReviewerRole(roles) && !canSeeAmDashboard(roles)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -67,10 +73,16 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const roles = await (await import('@/lib/permissions')).getCurrentUserRoles(supabase, user.id)
-    if (!hasReviewerRole(roles) && !canSeeAmDashboard(roles)) {
+    const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
+    if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Only reviewers, Quality Manager, Accountable Manager, or System Admin can update training records' },
+        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { status: 403 }
+      )
+    }
+    if (!canAddTraining(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can update training records.' },
         { status: 403 }
       )
     }
@@ -80,8 +92,6 @@ export async function PATCH(
       updatedAt: new Date().toISOString(),
     }
     if (body.name !== undefined) updates.name = String(body.name).trim()
-    if (body.code !== undefined) updates.code = body.code ? String(body.code).trim() : null
-    if (body.description !== undefined) updates.description = body.description ? String(body.description).trim() : null
     if (body.recordType !== undefined) updates.recordType = body.recordType === 'QUALIFICATION' ? 'QUALIFICATION' : 'TRAINING'
     if (body.type !== undefined) updates.recordType = body.type === 'QUALIFICATION' ? 'QUALIFICATION' : 'TRAINING'
     if (body.completedAt !== undefined) updates.completedAt = body.completedAt ? new Date(body.completedAt).toISOString() : null
@@ -130,10 +140,16 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const roles = await (await import('@/lib/permissions')).getCurrentUserRoles(supabase, user.id)
-    if (!hasReviewerRole(roles) && !canSeeAmDashboard(roles)) {
+    const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
+    if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Only reviewers, Quality Manager, Accountable Manager, or System Admin can delete training records' },
+        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { status: 403 }
+      )
+    }
+    if (!canAddTraining(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can delete training records.' },
         { status: 403 }
       )
     }

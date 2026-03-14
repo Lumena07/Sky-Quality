@@ -3,13 +3,14 @@
 import { MainLayout } from '@/components/layout/main-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Calendar, AlertCircle, FileCheck, TrendingUp, Clock, Download, Bell, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { exportDashboardStatsToExcel } from '@/lib/export/excel'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
-import { isNormalUser, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
+import { isNormalUser, canSeeAmDashboard, hasReviewerRole, isAccountableManager, isAdminOrQM } from '@/lib/permissions'
 
 const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   AUDIT_SCHEDULED: 'Audit scheduled',
@@ -34,6 +35,7 @@ type NotificationRow = {
 }
 
 const DashboardPage = () => {
+  const router = useRouter()
   const [roles, setRoles] = useState<string[] | null>(null)
   const [userName, setUserName] = useState<string | null>(null)
   const [notifications, setNotifications] = useState<NotificationRow[]>([])
@@ -61,7 +63,12 @@ const DashboardPage = () => {
         const res = await fetch('/api/me', { credentials: 'same-origin' })
         if (res.ok) {
           const data = await res.json()
-          setRoles(Array.isArray(data.roles) ? data.roles : [])
+          const nextRoles = Array.isArray(data.roles) ? data.roles : []
+          setRoles(nextRoles)
+          if (isAccountableManager(nextRoles) && !isAdminOrQM(nextRoles)) {
+            router.replace('/dashboard/am')
+            return
+          }
         } else {
           setRoles([])
         }
@@ -70,7 +77,7 @@ const DashboardPage = () => {
       }
     }
     fetchMe()
-  }, [])
+  }, [router])
 
   const fetchNotifications = async () => {
     try {

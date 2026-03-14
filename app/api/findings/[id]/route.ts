@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, isNormalUser } from '@/lib/permissions'
+import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard, canCreateFinding, canReviewFindingForAudit } from '@/lib/permissions'
 
 export async function GET(
   _request: Request,
@@ -66,21 +66,28 @@ export async function GET(
         .eq('findingId', id)
       correctiveActionData = (caRows?.length ?? 0) > 0 ? caRows : []
     }
-    const response = {
-      ...finding,
-      attachments: attachmentRows ?? [],
-      CorrectiveAction: Array.isArray(correctiveActionData) ? correctiveActionData : [correctiveActionData],
-    }
-
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    if (isNormalUser(roles)) {
-      const assignedToId = (response as { assignedToId?: string }).assignedToId
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles)) {
+      const assignedToId = (finding as { assignedToId?: string }).assignedToId
       if (assignedToId !== user.id) {
         return NextResponse.json(
           { error: 'You can only view findings assigned to you' },
           { status: 403 }
         )
       }
+    }
+
+    const auditId = (finding as { auditId?: string }).auditId
+    const canReviewCapCat =
+      typeof auditId === 'string'
+        ? await canReviewFindingForAudit(supabase, user.id, auditId, roles)
+        : false
+
+    const response = {
+      ...finding,
+      attachments: attachmentRows ?? [],
+      CorrectiveAction: Array.isArray(correctiveActionData) ? correctiveActionData : [correctiveActionData],
+      canReviewCapCat,
     }
 
     return NextResponse.json(response)
@@ -93,7 +100,7 @@ export async function GET(
   }
 }
 
-/** PATCH: Assignee updates root cause. Resubmission after reject sets status to PENDING. */
+/** PATCH: Assignee-only can update root cause (RCA); reviewers can update department, description, priority, assignee, classification. */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -110,23 +117,32 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
     const { data: existing } = await supabase
       .from('Finding')
       .select('assignedToId, status')
       .eq('id', id)
       .single()
 
-    if (!existing || (existing as { assignedToId: string }).assignedToId !== user.id) {
-      return NextResponse.json(
-        { error: 'Only the person assigned to this finding can update root cause' },
-        { status: 403 }
-      )
+    if (!existing) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
     }
 
-    const body = await request.clone().json().catch(() => ({}))
-    const rootCause = typeof body.rootCause === 'string' ? body.rootCause.trim() : null
+    const body = (await request.clone().json().catch(() => ({}))) as Record<string, unknown>
+    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
 
-    if (rootCause !== null) {
+    if (canCreateFinding(roles)) {
+      if (body.departmentId !== undefined) updates.departmentId = body.departmentId
+      if (body.description !== undefined) updates.description = body.description
+      if (body.priority !== undefined) updates.priority = body.priority
+      if (body.assignedToId !== undefined) updates.assignedToId = body.assignedToId
+      if (body.classificationId !== undefined) updates.classificationId = body.classificationId || null
+    }
+
+    const rootCause = typeof body.rootCause === 'string' ? body.rootCause.trim() : null
+    const isAssignee = (existing as { assignedToId: string }).assignedToId === user.id
+    // Only the person assigned to the finding can maintain RCA (assignee-only is intentional).
+    if (rootCause !== null && isAssignee) {
       const { data: existingCa } = await supabase
         .from('CorrectiveAction')
         .select('id')
@@ -138,18 +154,14 @@ export async function PATCH(
           { status: 400 }
         )
       }
-    }
-
-    const updates: Record<string, unknown> = {
-      updatedAt: new Date().toISOString(),
-    }
-    if (rootCause !== null) {
       updates.rootCause = rootCause
-      // Root cause has no approval status; only CAP and CAT are approved/rejected
-      // Move finding from OPEN to IN_PROGRESS when assignee first submits root cause
       if ((existing as { status?: string }).status === 'OPEN') {
         updates.status = 'IN_PROGRESS'
       }
+    }
+
+    if (Object.keys(updates).length <= 1) {
+      return NextResponse.json({ error: 'No allowed fields to update' }, { status: 400 })
     }
 
     const { data: updated, error } = await supabase

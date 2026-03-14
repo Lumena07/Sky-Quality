@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, hasReviewerRole } from '@/lib/permissions'
 import { PDFDocument } from 'pdf-lib'
 import { writeFile, mkdir, readFile } from 'fs/promises'
 import { join } from 'path'
@@ -20,6 +21,14 @@ export async function POST(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    if (!hasReviewerRole(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can edit approved manuals.' },
+        { status: 403 }
+      )
     }
 
     const { id } = await params

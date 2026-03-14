@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseServer'
 
-/** CAP due soon window in days (configurable via env; align with ICAO / Auric Air Manual). */
+/** CAP due soon window in days (configurable via env; align with ICAO / internal manual). */
 const CAP_DUE_SOON_DAYS = parseInt(process.env.CAP_DUE_SOON_DAYS ?? '3', 10)
 
 /**

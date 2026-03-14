@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
 import { setSessionCookie } from '@/components/auth/session-sync'
+import { isAccountableManager, isAdminOrQM } from '@/lib/permissions'
 
 const LoginPage = () => {
   const router = useRouter()
@@ -35,6 +36,17 @@ const LoginPage = () => {
 
       if (data.session?.access_token) {
         setSessionCookie(data.session.access_token)
+      }
+
+      const meRes = await fetch('/api/me', { credentials: 'same-origin' })
+      if (meRes.ok) {
+        const meData = await meRes.json()
+        const roles = Array.isArray(meData.roles) ? meData.roles : []
+        if (isAccountableManager(roles) && !isAdminOrQM(roles)) {
+          router.push('/dashboard/am')
+          router.refresh()
+          return
+        }
       }
 
       router.push('/dashboard')

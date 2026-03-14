@@ -64,7 +64,7 @@ describe('GET /api/dashboard/am', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns 403 when user is not AM or admin/QM', async () => {
+  it('returns 403 when user is not AM', async () => {
     mockGetUser.mockResolvedValueOnce({
       data: { user: { id: 'user-1' } },
       error: null,
@@ -77,6 +77,34 @@ describe('GET /api/dashboard/am', () => {
               single: () =>
                 Promise.resolve({
                   data: { roles: ['STAFF'], departmentId: null },
+                }),
+            }),
+          }),
+        }
+      }
+      return {}
+    })
+    const { GET } = await import('./route')
+    const req = new Request('http://localhost/api/dashboard/am')
+    const res = await GET(req)
+    expect(res.status).toBe(403)
+    const json = await res.json()
+    expect(json.error).toContain('Only Accountable Manager')
+  })
+
+  it('returns 403 when user is QM but not AM', async () => {
+    mockGetUser.mockResolvedValueOnce({
+      data: { user: { id: 'user-1' } },
+      error: null,
+    })
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'User') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: { roles: ['QUALITY_MANAGER'], departmentId: null },
                 }),
             }),
           }),
@@ -151,8 +179,6 @@ describe('GET /api/dashboard/am', () => {
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json).toHaveProperty('escalations')
-    expect(json).toHaveProperty('overdueCAPs')
-    expect(json).toHaveProperty('openFindingsCount')
-    expect(json).toHaveProperty('openByDepartment')
+    expect(json).toHaveProperty('pendingRescheduleRequests')
   })
 })

@@ -1,4 +1,4 @@
--- FindingEscalation: record when a finding was escalated to the Accountable Manager (per ICAO / Auric Air Manual).
+-- FindingEscalation: record when a finding was escalated to the Accountable Manager (per ICAO / internal manual).
 CREATE TABLE IF NOT EXISTS "FindingEscalation" (
   "id"           TEXT PRIMARY KEY,
   "findingId"    TEXT NOT NULL,

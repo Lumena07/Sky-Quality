@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/training-expiry",
       "schedule": "0 8 * * 0"
+    },
+    {
+      "path": "/api/cron/audit-upcoming",
+      "schedule": "0 8 * * *"
     }
   ]
 }

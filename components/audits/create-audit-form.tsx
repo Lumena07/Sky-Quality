@@ -51,9 +51,30 @@ interface CreateAuditFormProps {
   onSuccess: () => void
   /** When true (e.g. dialog opened), refetch users so focal persons are up to date. */
   open?: boolean
+  /** When creating from Audit Plan: plan id to link and optional pre-fill. */
+  auditPlanId?: string | null
+  /** Suggested start date (ISO string or YYYY-MM-DD) to pre-fill start/end. */
+  suggestedStartDate?: string | null
+  /** Plan name to pre-fill audit title. */
+  planName?: string | null
+  /** Optional default department id from plan. */
+  defaultDepartmentId?: string | null
+  /** Optional default base from plan. */
+  defaultBase?: string | null
+  /** Optional default scope from plan. */
+  defaultScope?: string | null
 }
 
-export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
+export const CreateAuditForm = ({
+  onSuccess,
+  open,
+  auditPlanId,
+  suggestedStartDate,
+  planName,
+  defaultDepartmentId,
+  defaultBase,
+  defaultScope,
+}: CreateAuditFormProps) => {
   const [loading, setLoading] = useState(false)
   const [departments, setDepartments] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
@@ -64,6 +85,9 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
   const [selectedAuditorOrgIds, setSelectedAuditorOrgIds] = useState<string[]>([])
   // Focal person (user id) per external auditee organization – findings will be assigned to them
   const [externalFocalByOrgId, setExternalFocalByOrgId] = useState<Record<string, string>>({})
+  // Title from plan dropdown or custom: '__custom__' or plan id
+  const [titleSource, setTitleSource] = useState<string>('__custom__')
+  const [auditPlans, setAuditPlans] = useState<Array<{ id: string; name: string; nextDueDate: string | null; linkedAudit: unknown; departmentId: string | null; base: string | null; scope: string | null }>>([])
 
   const {
     register,
@@ -98,6 +122,99 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
       fetchUsers()
     }
   }, [open])
+
+  const [auditPlansLoadError, setAuditPlansLoadError] = useState<string | null>(null)
+
+  const fetchAuditPlans = async () => {
+    setAuditPlansLoadError(null)
+    try {
+      const res = await fetch('/api/audit-plans', { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        setAuditPlans(Array.isArray(data) ? data : [])
+      } else {
+        setAuditPlans([])
+        if (res.status === 403) {
+          setAuditPlansLoadError('Audit plans could not be loaded. You can still schedule with a custom title below.')
+        }
+      }
+    } catch {
+      setAuditPlans([])
+      setAuditPlansLoadError('Audit plans could not be loaded. You can still schedule with a custom title below.')
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
+      fetchAuditPlans()
+    }
+  }, [open])
+
+  const notScheduledPlans = auditPlans.filter((p) => !p.linkedAudit)
+
+  useEffect(() => {
+    if (auditPlanId && typeof auditPlanId === 'string' && auditPlanId.trim()) {
+      setTitleSource(auditPlanId.trim())
+    } else {
+      setTitleSource('__custom__')
+    }
+  }, [auditPlanId])
+
+  useEffect(() => {
+    if (planName && typeof planName === 'string' && planName.trim()) {
+      setValue('title', planName.trim())
+    }
+  }, [planName, setValue])
+
+  useEffect(() => {
+    if (suggestedStartDate) {
+      const d = new Date(suggestedStartDate)
+      if (!Number.isNaN(d.getTime())) {
+        setValue('startDate', d)
+        setValue('endDate', d)
+      }
+    }
+  }, [suggestedStartDate, setValue])
+
+  useEffect(() => {
+    if (defaultDepartmentId && typeof defaultDepartmentId === 'string') {
+      setValue('departmentId', defaultDepartmentId)
+    }
+  }, [defaultDepartmentId, setValue])
+
+  useEffect(() => {
+    if (defaultBase && typeof defaultBase === 'string') {
+      setValue('base', defaultBase)
+    }
+  }, [defaultBase, setValue])
+
+  useEffect(() => {
+    if (defaultScope && typeof defaultScope === 'string') {
+      setValue('scope', defaultScope)
+    }
+  }, [defaultScope, setValue])
+
+  const handleTitleSourceChange = (value: string) => {
+    setTitleSource(value)
+    if (value === '__custom__') {
+      setValue('title', '')
+    } else {
+      const plan = auditPlans.find((p) => p.id === value)
+      if (plan) {
+        setValue('title', plan.name)
+        if (plan.nextDueDate) {
+          const d = new Date(plan.nextDueDate + 'T12:00:00Z')
+          if (!Number.isNaN(d.getTime())) {
+            setValue('startDate', d)
+            setValue('endDate', d)
+          }
+        }
+        if (plan.departmentId) setValue('departmentId', plan.departmentId)
+        if (plan.base) setValue('base', plan.base)
+        if (plan.scope) setValue('scope', plan.scope)
+      }
+    }
+  }
 
   const fetchOrganizations = async () => {
     try {
@@ -204,6 +321,7 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
               ? selectedAuditeeOrgIds.map((orgId) => ({ organizationId: orgId, userId: externalFocalByOrgId[orgId] }))
               : undefined,
           departmentId: data.type === 'ERP' ? undefined : data.departmentId,
+          ...(titleSource !== '__custom__' && titleSource.trim() ? { auditPlanId: titleSource.trim() } : {}),
         }),
       })
 
@@ -227,14 +345,47 @@ export const CreateAuditForm = ({ onSuccess, open }: CreateAuditFormProps) => {
     }
   }
 
+  const planOptions = (() => {
+    const list = [...notScheduledPlans]
+    if (auditPlanId && typeof auditPlanId === 'string' && !list.some((p) => p.id === auditPlanId)) {
+      const fromAll = auditPlans.find((p) => p.id === auditPlanId)
+      if (fromAll) return [fromAll, ...list]
+    }
+    return list
+  })()
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="title-source">Audit / Title from plan or custom *</Label>
+        <Select value={titleSource} onValueChange={handleTitleSourceChange}>
+          <SelectTrigger id="title-source" aria-label="Choose from plan or custom title">
+            <SelectValue placeholder="Choose from plan or custom" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__custom__">Custom title (not from plan)</SelectItem>
+            {planOptions.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {auditPlansLoadError && (
+          <p className="text-sm text-amber-600" role="alert">
+            {auditPlansLoadError}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Choose a not-yet-scheduled plan to link this audit, or use a custom title.
+        </p>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="title">Audit Title *</Label>
         <Input
           id="title"
           {...register('title')}
-          placeholder="Internal Audit - Q1 2024"
+          placeholder={titleSource === '__custom__' ? 'Internal Audit - Q1 2024' : 'From plan or edit as needed'}
         />
         {errors.title && (
           <p className="text-sm text-destructive">{errors.title.message}</p>

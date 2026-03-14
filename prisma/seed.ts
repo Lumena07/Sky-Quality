@@ -48,9 +48,9 @@ async function main() {
       password: hashedPassword,
       firstName: 'System',
       lastName: 'Admin',
-      role: 'SYSTEM_ADMIN',
+      role: 'QUALITY_MANAGER',
       departmentId: dept3.id,
-      position: 'System Administrator',
+      position: 'Quality Manager',
     },
   })
 

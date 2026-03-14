@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
-import { getCurrentUserProfile, canEditDocument, isNormalUser } from '@/lib/permissions'
+import { getCurrentUserProfile, canEditDocument, isNormalUser, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
 
 export async function GET(
   request: Request,
@@ -51,9 +51,10 @@ export async function GET(
     const canOpen =
       isManualHolder ||
       isApprovedForMyDept ||
-      canEditDocument(isReviewOrDraft, isManualHolder, roles)
+      canEditDocument(isReviewOrDraft, isManualHolder, roles) ||
+      canSeeAmDashboard(roles)
 
-    if (isNormalUser(roles) && !isApprovedForMyDept && !isManualHolder) {
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles) && !isApprovedForMyDept && !isManualHolder) {
       return NextResponse.json(
         { error: 'You can only view approved documents for your department or documents you are a manual holder of' },
         { status: 403 }
@@ -61,7 +62,7 @@ export async function GET(
     }
     if (isReviewOrDraft && !canOpen) {
       return NextResponse.json(
-        { error: 'Only manual holders, or auditors/quality managers/system admins, can open this document' },
+        { error: 'Only manual holders, or auditors/quality managers, can open this document' },
         { status: 403 }
       )
     }
@@ -125,12 +126,21 @@ export async function PATCH(
     const isManualHolder =
       Array.isArray(manualHolderIds) && manualHolderIds.includes(user.id)
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    const canEdit = canEditDocument(isReviewOrDraft, isManualHolder, roles)
-    if (isReviewOrDraft && !canEdit) {
-      return NextResponse.json(
-        { error: 'Only manual holders, or auditors/quality managers/system admins, can edit this document' },
-        { status: 403 }
-      )
+    if (docStatus === 'APPROVED') {
+      if (!hasReviewerRole(roles)) {
+        return NextResponse.json(
+          { error: 'Only Quality Manager or auditors can edit approved manuals.' },
+          { status: 403 }
+        )
+      }
+    } else {
+      const canEdit = canEditDocument(isReviewOrDraft, isManualHolder, roles)
+      if (isReviewOrDraft && !canEdit) {
+        return NextResponse.json(
+          { error: 'Only manual holders, or auditors/quality managers, can edit this document' },
+          { status: 403 }
+        )
+      }
     }
 
     const newVersion = incrementVersion(existing.version)

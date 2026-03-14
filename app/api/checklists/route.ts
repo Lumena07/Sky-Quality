@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, canCreateOrEditChecklist } from '@/lib/permissions'
 
 export async function GET(request: Request) {
   try {
@@ -87,6 +88,14 @@ export async function POST(request: Request) {
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    if (!canCreateOrEditChecklist(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can create or edit checklists.' },
+        { status: 403 }
+      )
     }
 
     const body = await request.json()

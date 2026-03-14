@@ -1,6 +1,6 @@
-# Training and Qualifications (ICAO / Auric Air Manual)
+# Training and Qualifications (ICAO)
 
-Training and qualifications in Sky SQ QMS are maintained in line with **ICAO** standards and your **Auric Air Manual**. The Accountable Manager is part of Quality; Quality Manager and Auditors use ICAO and the manual for guidance.
+Training and qualifications in Sky SQ QMS are maintained in line with **ICAO** standards and your internal manual. The Accountable Manager is part of Quality; Quality Manager and Auditors use ICAO and the manual for guidance.
 
 ## Module
 
@@ -19,4 +19,4 @@ Training and qualifications in Sky SQ QMS are maintained in line with **ICAO** s
 |----------|-------------|
 | `TRAINING_EXPIRY_WITHIN_DAYS` | Days before expiry to send notification (default: 30). |
 
-Refer to ICAO and the Auric Air Manual when defining required training and qualification types and expiry rules.
+Refer to ICAO and your internal manual when defining required training and qualification types and expiry rules.

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserRoles, canReviewFinding } from '@/lib/permissions'
+import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
 
 /** Approve or reject Corrective Action Taken (CAT). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -22,12 +22,30 @@ export async function PATCH(
     const roles = await getCurrentUserRoles(supabase, user.id)
     if (!canReviewFinding(roles)) {
       return NextResponse.json(
-        { error: 'Only auditors, quality managers, and system admins can review CAT' },
+        { error: 'Only auditors or quality managers can review CAT' },
         { status: 403 }
       )
     }
 
     const { id: findingId } = await params
+
+    const { data: findingRow, error: findingErr } = await supabase
+      .from('Finding')
+      .select('auditId')
+      .eq('id', findingId)
+      .single()
+    if (findingErr || !findingRow) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
+    }
+    const auditId = (findingRow as { auditId: string }).auditId
+    const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
+    if (!canReview) {
+      return NextResponse.json(
+        { error: 'Only auditors assigned to this audit or Quality Manager can review CAT' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const approved = body.approved === true
     const rejectionReason =
@@ -56,22 +74,19 @@ export async function PATCH(
     if (approved) {
       const { data: findingRowForValidation } = await supabase
         .from('Finding')
-        .select('rootCause, rootCauseStatus')
+        .select('rootCause')
         .eq('id', findingId)
         .single()
 
       const rootCause = (findingRowForValidation as { rootCause?: string | null } | null)?.rootCause
-      const rootCauseStatus = (findingRowForValidation as { rootCauseStatus?: string | null } | null)?.rootCauseStatus
       const capStatus = (ca as { capStatus?: string | null }).capStatus
 
       const rootCauseMissing = rootCause == null || String(rootCause).trim() === ''
-      const rootCauseNotApproved = rootCauseStatus !== 'APPROVED'
       const capNotApproved = capStatus !== 'APPROVED'
 
-      if (rootCauseMissing || rootCauseNotApproved || capNotApproved) {
+      if (rootCauseMissing || capNotApproved) {
         const reasons: string[] = []
         if (rootCauseMissing) reasons.push('root cause must be set')
-        if (rootCauseNotApproved) reasons.push('root cause must be approved')
         if (capNotApproved) reasons.push('Corrective Action Plan must be approved')
         return NextResponse.json(
           { error: `Root cause and CAP must be set and approved before closing. Missing: ${reasons.join('; ')}.` },
@@ -138,7 +153,12 @@ export async function PATCH(
     if (approved) {
       await supabase
         .from('Finding')
-        .update({ status: 'CLOSED', updatedAt: now })
+        .update({
+          status: 'CLOSED',
+          closedDate: now,
+          closedBy: user.id,
+          updatedAt: now,
+        })
         .eq('id', findingId)
     }
 

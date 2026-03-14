@@ -33,7 +33,7 @@ export async function POST(
     const { roles } = await getCurrentUserProfile(supabase, user.id)
     const isAssignee = assignedToId === user.id
     const isReviewer = roles.some(
-      (r) => r === 'SYSTEM_ADMIN' || r === 'QUALITY_MANAGER' || r === 'AUDITOR'
+      (r) => r === 'QUALITY_MANAGER' || r === 'AUDITOR'
     )
     if (!isAssignee && !isReviewer) {
       return NextResponse.json(

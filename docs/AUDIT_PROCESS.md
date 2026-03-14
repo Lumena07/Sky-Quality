@@ -1,6 +1,6 @@
 # Audit process – schedule, meetings, and extensions
 
-This document describes how audits are scheduled, how opening and closing meetings work, and how auditees can request extensions for Root cause, CAP, and CAT due dates. Align with your internal manual and ICAO / Auric Air requirements as needed.
+This document describes how audits are scheduled, how opening and closing meetings work, and how auditees can request extensions for Root cause, CAP, and CAT due dates. Align with your internal manual and ICAO requirements as needed.
 
 ---
 

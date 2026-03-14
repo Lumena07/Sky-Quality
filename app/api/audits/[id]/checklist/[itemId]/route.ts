@@ -1,6 +1,36 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
+
+async function requireCanEditAudit(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  auditId: string,
+  userId: string,
+  roles: string[]
+): Promise<{ error: NextResponse } | null> {
+  const { data: auditorRows } = await supabase
+    .from('AuditAuditor')
+    .select('userId')
+    .eq('auditId', auditId)
+  const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+  const { data: auditeeRows } = await supabase
+    .from('AuditAuditee')
+    .select('userId')
+    .eq('auditId', auditId)
+  const auditeeIds = (auditeeRows ?? [])
+    .map((r: { userId: string | null }) => r.userId)
+    .filter(Boolean) as string[]
+  if (!canEditAudit(roles, userId, auditorIds, auditeeIds)) {
+    return {
+      error: NextResponse.json(
+        { error: 'Only Quality Manager or auditors assigned to this audit can modify the checklist' },
+        { status: 403 }
+      ),
+    }
+  }
+  return null
+}
 
 export async function PATCH(
   request: Request,
@@ -16,6 +46,10 @@ export async function PATCH(
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const editErr = await requireCanEditAudit(supabase, params.id, user.id, roles)
+    if (editErr) return editErr.error
 
     const body = await request.json()
     const { content, order, type } = body
@@ -79,6 +113,10 @@ export async function DELETE(
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const editErr = await requireCanEditAudit(supabase, params.id, user.id, roles)
+    if (editErr) return editErr.error
 
     const { data: checklistItem, error: fetchError } = await supabase
       .from('ChecklistItem')

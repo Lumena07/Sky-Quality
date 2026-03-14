@@ -43,7 +43,7 @@ async function notifyAuditorsForFinding(
   }
 }
 
-/** PATCH: Assignee updates corrective action plan and/or corrective action taken. Resubmission sets status to PENDING. */
+/** PATCH: Only the person assigned to the finding can update CAP/CAT (RCA is on Finding; assignee-only edit is intentional). */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -73,7 +73,7 @@ export async function PATCH(
     const assignedToId = (finding as { assignedToId: string }).assignedToId
     if (assignedToId !== user.id) {
       return NextResponse.json(
-        { error: 'Only the person assigned to this finding can update corrective action' },
+        { error: 'Only the person assigned to this finding can update RCA, CAP, or CAT' },
         { status: 403 }
       )
     }
@@ -117,6 +117,8 @@ export async function PATCH(
         updates.correctiveActionTaken = correctiveActionTaken
         updates.catStatus = 'PENDING'
         updates.catRejectionReason = null
+        updates.catEnteredAt = new Date().toISOString()
+        if (closeOutDueDate) updates.catDueDate = closeOutDueDate
       }
       if (Object.keys(updates).length > 1) {
         const { error: updateErr } = await supabase
@@ -156,6 +158,7 @@ export async function PATCH(
                 correctiveActionTaken,
                 catStatus: 'PENDING',
                 catDueDate: closeOutDueDate || fallbackDue,
+                catEnteredAt: now,
               }
             : {}),
         })

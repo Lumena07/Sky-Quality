@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { CreateFindingForm } from '@/components/findings/create-finding-form'
 
-const REVIEWER_ROLES = ['SYSTEM_ADMIN', 'QUALITY_MANAGER', 'AUDITOR']
+const REVIEWER_ROLES = ['QUALITY_MANAGER', 'AUDITOR']
 
 /** Get CorrectiveAction row from finding (handles API shape: array or single). */
 const getCorrectiveAction = (finding: Record<string, unknown>) => {

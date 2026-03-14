@@ -1,4 +1,4 @@
--- TrainingRecord: training and qualifications for staff (Quality Dept and others). Per ICAO / Auric Air Manual.
+-- TrainingRecord: training and qualifications for staff (Quality Dept and others). Per ICAO / internal manual.
 CREATE TABLE IF NOT EXISTS "TrainingRecord" (
   "id"           TEXT PRIMARY KEY,
   "userId"       TEXT NOT NULL,

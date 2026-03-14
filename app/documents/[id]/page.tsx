@@ -19,6 +19,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PdfPageStrip } from '@/components/documents/pdf-page-strip'
+import { hasReviewerRole } from '@/lib/permissions'
 
 const isPdf = (doc: any) =>
   doc?.fileType === 'application/pdf' || /\.pdf$/i.test(doc?.fileUrl || '')
@@ -31,6 +32,7 @@ const DocumentViewPage = () => {
   const [document, setDocument] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [accessError, setAccessError] = useState<string | null>(null)
+  const [userRoles, setUserRoles] = useState<string[]>([])
 
   const [removePagesOpen, setRemovePagesOpen] = useState(false)
   const [removePagesPageCount, setRemovePagesPageCount] = useState(0)
@@ -90,8 +92,26 @@ const DocumentViewPage = () => {
   }, [id])
 
   useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        const res = await fetch('/api/me', { credentials: 'same-origin' })
+        if (res.ok) {
+          const data = await res.json()
+          setUserRoles(Array.isArray(data.roles) ? data.roles : [])
+        }
+      } catch {
+        setUserRoles([])
+      }
+    }
+    fetchMe()
+  }, [])
+
+  const canEditApprovedPdf =
+    document == null || document?.status !== 'APPROVED' || hasReviewerRole(userRoles)
+
+  useEffect(() => {
     if (loading || !document || !isPdf(document)) return
-    if (searchParams.get('mode') === 'edit') {
+    if (searchParams.get('mode') === 'edit' && canEditApprovedPdf) {
       setDocMode('edit')
       setEditSelected(new Set())
       setEditLoading(true)
@@ -108,8 +128,10 @@ const DocumentViewPage = () => {
           setOriginalEditOrder([])
         })
         .finally(() => setEditLoading(false))
+    } else if (!canEditApprovedPdf) {
+      setDocMode('view')
     }
-  }, [document, loading, searchParams])
+  }, [document, loading, searchParams, canEditApprovedPdf])
 
   const handleSwitchToEdit = () => {
     setDocMode('edit')
@@ -484,7 +506,7 @@ const DocumentViewPage = () => {
   }
 
   const docIsPdf = isPdf(document)
-  const editAllowed = searchParams.get('mode') === 'edit'
+  const editAllowed = searchParams.get('mode') === 'edit' && canEditApprovedPdf
 
   return (
     <MainLayout>
@@ -516,7 +538,7 @@ const DocumentViewPage = () => {
             <div className="flex items-center gap-2">
               {docIsPdf ? (
                 <>
-                  {editAllowed ? (
+                  {canEditApprovedPdf ? (
                     <>
                       <div className="flex rounded-md border border-input p-0.5">
                         <button

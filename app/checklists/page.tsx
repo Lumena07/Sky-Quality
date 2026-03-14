@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { ChecklistBuilder } from '@/components/checklist/checklist-builder'
+import { canCreateOrEditChecklist } from '@/lib/permissions'
 
 const ChecklistsPage = () => {
   const [checklists, setChecklists] = useState<any[]>([])
@@ -23,9 +24,25 @@ const ChecklistsPage = () => {
   const [selectedChecklist, setSelectedChecklist] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [roles, setRoles] = useState<string[]>([])
 
   useEffect(() => {
     fetchChecklists()
+  }, [])
+
+  useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        const res = await fetch('/api/me', { credentials: 'same-origin' })
+        if (res.ok) {
+          const data = await res.json()
+          setRoles(Array.isArray(data.roles) ? data.roles : [])
+        }
+      } catch {
+        setRoles([])
+      }
+    }
+    fetchMe()
   }, [])
 
   const fetchChecklists = async () => {
@@ -92,6 +109,7 @@ const ChecklistsPage = () => {
           <div>
             <h1 className="text-3xl font-bold">Checklists</h1>
           </div>
+          {canCreateOrEditChecklist(roles) && (
           <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -112,6 +130,7 @@ const ChecklistsPage = () => {
               />
             </DialogContent>
           </Dialog>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -171,23 +190,27 @@ const ChecklistsPage = () => {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 pt-2 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(checklist.id)}
-                        className="flex-1"
-                      >
-                        <Edit className="mr-2 h-4 w-4" />
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(checklist.id, checklist.name)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canCreateOrEditChecklist(roles) && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEdit(checklist.id)}
+                            className="flex-1"
+                          >
+                            <Edit className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDelete(checklist.id, checklist.name)}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>

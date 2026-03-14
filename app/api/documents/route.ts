@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { generateDocumentNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
-import { getCurrentUserProfile, isNormalUser } from '@/lib/permissions'
+import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard } from '@/lib/permissions'
 
 export async function GET(request: Request) {
   try {
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
 
-    if (isNormalUser(roles)) {
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles)) {
       const manualHolderQuery = supabase
         .from('Document')
         .select('*, Revisions:DocumentRevision(*)')
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
     const roles = await getCurrentUserRoles(supabase, user.id)
     if (!canCreateFinding(roles)) {
       return NextResponse.json(
-        { error: 'Only auditors, quality managers, and system admins can create documents' },
+        { error: 'Only auditors or quality managers can create documents' },
         { status: 403 }
       )
     }

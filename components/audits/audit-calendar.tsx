@@ -244,10 +244,20 @@ export const AuditCalendar = ({ audits, onDateClick }: AuditCalendarProps) => {
                               {dayAudits.slice(0, 3).map((audit) => {
                                 const auditType = audit.type || 'INTERNAL'
                                 const typeColor = getAuditTypeColor(auditType)
-                                const auditors = audit.auditors || []
-                                const auditorColors = auditors
-                                  .map((a: any) => auditorColorMap.get(a.user?.id))
-                                  .filter((color: string | undefined) => color !== undefined)
+                                const auditAuditors = audit.Auditors ?? audit.auditors ?? []
+                                const auditorColorEntries = auditAuditors
+                                  .map((a: any) => {
+                                    const userId = a.userId ?? a.User?.id ?? a.user?.id
+                                    const color = userId ? auditorColorMap.get(userId) : undefined
+                                    const name =
+                                      a.User?.firstName != null && a.User?.lastName != null
+                                        ? `${a.User.firstName} ${a.User.lastName}`.trim()
+                                        : a.user?.firstName != null && a.user?.lastName != null
+                                          ? `${a.user.firstName} ${a.user.lastName}`.trim()
+                                          : undefined
+                                    return color != null ? { color, name } : null
+                                  })
+                                  .filter(Boolean) as { color: string; name?: string }[]
 
                                 return (
                                   <div
@@ -275,18 +285,14 @@ export const AuditCalendar = ({ audits, onDateClick }: AuditCalendarProps) => {
                                         {audit.status}
                                       </Badge>
                                     </div>
-                                    {auditorColors.length > 0 && (
+                                    {auditorColorEntries.length > 0 && (
                                       <div className="w-full h-1 rounded overflow-hidden flex gap-px">
-                                        {auditorColors.map((color: string, idx: number) => (
+                                        {auditorColorEntries.map(({ color, name }, idx) => (
                                           <div
                                             key={idx}
                                             className="flex-1 rounded"
                                             style={{ backgroundColor: color }}
-                                            title={
-                                              auditors[idx]?.user
-                                                ? `${auditors[idx].user.firstName} ${auditors[idx].user.lastName}`
-                                                : undefined
-                                            }
+                                            title={name}
                                           />
                                         ))}
                                       </div>

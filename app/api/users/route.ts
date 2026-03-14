@@ -117,7 +117,6 @@ export async function POST(request: Request) {
     }
 
     const validRoles = [
-      'SYSTEM_ADMIN',
       'QUALITY_MANAGER',
       'ACCOUNTABLE_MANAGER',
       'AUDITOR',

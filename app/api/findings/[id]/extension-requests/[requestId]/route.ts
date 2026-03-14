@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
-import { getCurrentUserProfile, canReviewFinding } from '@/lib/permissions'
+import { getCurrentUserProfile, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
 
 export async function PATCH(
   request: Request,
@@ -24,6 +24,23 @@ export async function PATCH(
     if (!canReviewFinding(roles)) {
       return NextResponse.json(
         { error: 'Only reviewers can approve or reject extension requests' },
+        { status: 403 }
+      )
+    }
+
+    const { data: findingRow, error: findingErr } = await supabase
+      .from('Finding')
+      .select('auditId')
+      .eq('id', findingId)
+      .single()
+    if (findingErr || !findingRow) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
+    }
+    const auditId = (findingRow as { auditId: string }).auditId
+    const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
+    if (!canReview) {
+      return NextResponse.json(
+        { error: 'Only auditors assigned to this audit or Quality Manager can approve or reject extension requests' },
         { status: 403 }
       )
     }

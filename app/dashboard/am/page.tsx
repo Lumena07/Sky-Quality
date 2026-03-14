@@ -2,8 +2,17 @@
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useEffect, useState } from 'react'
-import { AlertCircle, Shield, TrendingUp, Building2 } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { useEffect, useState, useCallback } from 'react'
+import { AlertCircle, Shield, ArrowUpRight, CalendarClock } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,58 +26,88 @@ type EscalationRow = {
   Finding?: Array<{ findingNumber: string; status: string }> | { findingNumber: string; status: string }
 }
 
-type OverdueCapRow = {
+type RescheduleRequestRow = {
   id: string
-  findingId: string
-  dueDate: string
-  Finding?: Array<{
-    findingNumber: string
-    status: string
-    departmentId: string
-    Department?: Array<{ name: string }> | { name: string }
-  }> | {
-    findingNumber: string
-    status: string
-    departmentId: string
-    Department?: Array<{ name: string }> | { name: string }
-  }
+  auditId: string
+  requestedStartDate: string
+  requestedEndDate: string
+  requestedAt: string
+  reason: string | null
+  Audit?: { id: string; title?: string } | null
+  RequestedBy?: { id: string; firstName?: string; lastName?: string } | null
 }
 
 type AmDashboardData = {
   escalations: EscalationRow[]
-  overdueCAPs: OverdueCapRow[]
-  overdueCAPsCount: number
-  openFindingsCount: number
-  openByDepartment: Array<{ departmentId: string; departmentName: string; count: number }>
+  pendingRescheduleRequests: RescheduleRequestRow[]
 }
 
 const AmDashboardPage = () => {
   const [data, setData] = useState<AmDashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [rejectDialogRequest, setRejectDialogRequest] = useState<{
+    auditId: string
+    requestId: string
+  } | null>(null)
+  const [rescheduleReviewNotes, setRescheduleReviewNotes] = useState('')
+  const [savingRescheduleReview, setSavingRescheduleReview] = useState(false)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch('/api/dashboard/am', { credentials: 'same-origin' })
-        if (!res.ok) {
-          if (res.status === 403) {
-            setError('You do not have access to the AM Dashboard.')
-            return
-          }
-          setError('Failed to load AM dashboard')
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/dashboard/am', { credentials: 'same-origin' })
+      if (!res.ok) {
+        if (res.status === 403) {
+          setError('You do not have access to the AM Dashboard.')
           return
         }
-        const json = await res.json()
-        setData(json)
-      } catch {
         setError('Failed to load AM dashboard')
-      } finally {
-        setLoading(false)
+        return
       }
+      const json = await res.json()
+      setData(json)
+    } catch {
+      setError('Failed to load AM dashboard')
+    } finally {
+      setLoading(false)
     }
-    fetchData()
   }, [])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  const handleRescheduleApproveReject = async (
+    auditId: string,
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED',
+    reviewNotes?: string
+  ) => {
+    setSavingRescheduleReview(true)
+    try {
+      const res = await fetch(
+        `/api/audits/${auditId}/reschedule-requests/${requestId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, reviewNotes: reviewNotes ?? null }),
+          credentials: 'same-origin',
+        }
+      )
+      if (res.ok) {
+        setRejectDialogRequest(null)
+        setRescheduleReviewNotes('')
+        await fetchData()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert((err as { error?: string }).error ?? 'Failed to update reschedule request')
+      }
+    } catch {
+      alert('Failed to update reschedule request')
+    } finally {
+      setSavingRescheduleReview(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -102,95 +141,89 @@ const AmDashboardPage = () => {
     return arr[0]?.findingNumber ?? '—'
   }
 
-  const getFindingFromCa = (f: OverdueCapRow['Finding']): { findingNumber: string; departmentName: string } => {
-    if (!f) return { findingNumber: '—', departmentName: '—' }
-    const arr = Array.isArray(f) ? f : [f]
-    const first = arr[0]
-    const dept = first?.Department
-    const departmentName = Array.isArray(dept) ? dept[0]?.name : dept?.name
-    return {
-      findingNumber: first?.findingNumber ?? '—',
-      departmentName: departmentName ?? '—',
-    }
+  const getTriggerLabel = (trigger: string): string => {
+    if (trigger === 'P1') return 'Priority 1'
+    if (trigger === 'CAT_OVERDUE') return 'CAT overdue'
+    if (trigger === 'OVERDUE_CAP') return 'CAP overdue'
+    return trigger
   }
 
   return (
     <MainLayout>
       <div className="p-8">
-        <div className="mb-8 flex items-center gap-2">
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2">
           <Shield className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-3xl font-bold">Accountable Manager Dashboard</h1>
             <p className="text-muted-foreground mt-1">
-              Oversight of escalated findings, overdue CAPs, and department compliance
+              Escalations requiring your attention.
             </p>
           </div>
+          </div>
+          <Link href="/dashboard/performance">
+            <Button variant="outline" className="gap-2" aria-label="Open Performance dashboard">
+              Performance
+              <ArrowUpRight className="h-4 w-4" />
+            </Button>
+          </Link>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        <div className="max-w-5xl">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Escalated to AM</CardTitle>
-              <AlertCircle className="h-4 w-4 text-amber-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data.escalations.length}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Overdue CAPs</CardTitle>
-              <TrendingUp className="h-4 w-4 text-purple-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data.overdueCAPsCount}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Open Findings</CardTitle>
-              <AlertCircle className="h-4 w-4 text-red-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data.openFindingsCount}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Departments</CardTitle>
-              <Building2 className="h-4 w-4 text-blue-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data.openByDepartment.length}</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Escalated to AM</CardTitle>
-              <CardDescription>Findings reported to the Accountable Manager (ICAO / Auric Air Manual)</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between space-y-0">
+              <div>
+                <CardTitle>Escalations</CardTitle>
+                <CardDescription>Findings escalated for management oversight.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs">
+                  {data.escalations.length} total
+                </Badge>
+                <AlertCircle className="h-4 w-4 text-amber-600" />
+              </div>
             </CardHeader>
             <CardContent>
               {data.escalations.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No escalations.</p>
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <p className="text-sm font-medium">No escalations right now.</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    You can review CAP/CAT status and trends in the Performance dashboard.
+                  </p>
+                  <div className="mt-3">
+                    <Link href="/dashboard/performance">
+                      <Button variant="outline" className="gap-2" aria-label="View Performance dashboard">
+                        View Performance dashboard
+                        <ArrowUpRight className="h-4 w-4" />
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
               ) : (
-                <ul className="space-y-2" role="list">
+                <ul className="space-y-3" role="list">
                   {data.escalations.slice(0, 15).map((e) => (
                     <li
                       key={e.id}
-                      className="flex items-center justify-between rounded-lg border p-2 text-sm"
+                      className="flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <span className="font-medium">{getFindingNumber(e.Finding)}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {e.trigger}
-                      </Badge>
-                      <Link href={`/findings/${e.findingId}`}>
-                        <Button variant="ghost" size="sm" aria-label={`View finding ${getFindingNumber(e.Finding)}`}>
-                          View
-                        </Button>
-                      </Link>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{getFindingNumber(e.Finding)}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {getTriggerLabel(e.trigger)}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Escalated {formatDate(e.escalatedAt)}
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Link href={`/findings/${e.findingId}`}>
+                          <Button variant="outline" size="sm" aria-label={`View finding ${getFindingNumber(e.Finding)}`}>
+                            View
+                          </Button>
+                        </Link>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -205,34 +238,77 @@ const AmDashboardPage = () => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Overdue CAPs</CardTitle>
-              <CardDescription>Corrective Action Plans past due date</CardDescription>
+          <Card className="mt-6">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0">
+              <div>
+                <CardTitle>Reschedule requests</CardTitle>
+                <CardDescription>Audit reschedule requests awaiting your approval or rejection.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs">
+                  {(data.pendingRescheduleRequests ?? []).length} pending
+                </Badge>
+                <CalendarClock className="h-4 w-4 text-amber-600" />
+              </div>
             </CardHeader>
             <CardContent>
-              {data.overdueCAPs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No overdue CAPs.</p>
+              {!data.pendingRescheduleRequests?.length ? (
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <p className="text-sm font-medium">No pending reschedule requests.</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    When auditors request an audit reschedule, it will appear here for you to approve or reject.
+                  </p>
+                </div>
               ) : (
-                <ul className="space-y-2" role="list">
-                  {data.overdueCAPs.slice(0, 15).map((ca) => {
-                    const { findingNumber, departmentName } = getFindingFromCa(ca.Finding)
+                <ul className="space-y-3" role="list">
+                  {(data.pendingRescheduleRequests ?? []).map((r) => {
+                    const audit = Array.isArray(r.Audit) ? r.Audit[0] : r.Audit
+                    const requestedBy = Array.isArray(r.RequestedBy) ? r.RequestedBy[0] : r.RequestedBy
+                    const name = requestedBy
+                      ? [requestedBy.firstName, requestedBy.lastName].filter(Boolean).join(' ') || '—'
+                      : '—'
                     return (
                       <li
-                        key={ca.id}
-                        className="flex items-center justify-between rounded-lg border p-2 text-sm"
+                        key={r.id}
+                        className="flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div>
-                          <span className="font-medium">{findingNumber}</span>
-                          <span className="text-muted-foreground ml-2">{departmentName}</span>
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{audit?.title ?? 'Audit'}</div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Requested: {r.requestedStartDate} – {r.requestedEndDate}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            By {name} · {formatDate(r.requestedAt)}
+                          </p>
+                          {r.reason && (
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.reason}</p>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">
-                            Due {formatDate(ca.dueDate)}
-                          </span>
-                          <Link href={`/findings/${ca.findingId}`}>
-                            <Button variant="ghost" size="sm" aria-label={`View finding ${findingNumber}`}>
-                              View
+                        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                          <Button
+                            size="sm"
+                            disabled={savingRescheduleReview}
+                            onClick={() =>
+                              handleRescheduleApproveReject(r.auditId, r.id, 'APPROVED')
+                            }
+                            aria-label={`Approve reschedule for ${audit?.title ?? r.auditId}`}
+                          >
+                            {savingRescheduleReview ? 'Saving…' : 'Approve'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={savingRescheduleReview}
+                            onClick={() =>
+                              setRejectDialogRequest({ auditId: r.auditId, requestId: r.id })
+                            }
+                            aria-label={`Reject reschedule for ${audit?.title ?? r.auditId}`}
+                          >
+                            Reject
+                          </Button>
+                          <Link href={`/audits/${r.auditId}`}>
+                            <Button variant="outline" size="sm" aria-label={`View audit ${audit?.title ?? r.auditId}`}>
+                              View audit
                             </Button>
                           </Link>
                         </div>
@@ -241,40 +317,60 @@ const AmDashboardPage = () => {
                   })}
                 </ul>
               )}
-              {data.overdueCAPs.length > 0 && (
-                <Link href="/findings?overdue=true">
-                  <Button variant="outline" className="w-full mt-2">
-                    View all overdue
-                  </Button>
-                </Link>
-              )}
             </CardContent>
           </Card>
         </div>
 
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Open Findings by Department</CardTitle>
-            <CardDescription>Count of open/in-progress findings per department</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {data.openByDepartment.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No open findings.</p>
-            ) : (
-              <ul className="space-y-2" role="list">
-                {data.openByDepartment.map((d) => (
-                  <li
-                    key={d.departmentId}
-                    className="flex items-center justify-between rounded-lg border p-2 text-sm"
-                  >
-                    <span className="font-medium">{d.departmentName}</span>
-                    <Badge variant="secondary">{d.count}</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <Dialog
+          open={rejectDialogRequest !== null}
+          onOpenChange={(open) => !open && setRejectDialogRequest(null)}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reject reschedule request</DialogTitle>
+              <DialogDescription>
+                Optionally add notes for the requester.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="am-reschedule-reject-notes">Review notes</Label>
+                <Textarea
+                  id="am-reschedule-reject-notes"
+                  value={rescheduleReviewNotes}
+                  onChange={(e) => setRescheduleReviewNotes(e.target.value)}
+                  placeholder="Reason for rejection (optional)"
+                  rows={3}
+                  className="resize-none"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setRejectDialogRequest(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={savingRescheduleReview}
+                  onClick={() => {
+                    if (rejectDialogRequest) {
+                      handleRescheduleApproveReject(
+                        rejectDialogRequest.auditId,
+                        rejectDialogRequest.requestId,
+                        'REJECTED',
+                        rescheduleReviewNotes
+                      )
+                    }
+                  }}
+                >
+                  {savingRescheduleReview ? 'Saving…' : 'Reject'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </MainLayout>
   )

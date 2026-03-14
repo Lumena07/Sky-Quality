@@ -134,7 +134,8 @@ const FindingDetailPage = () => {
   const assignee = finding ? (finding.AssignedTo ?? finding.assignedTo) : null
   const assignedToId = finding?.assignedToId ?? finding?.AssignedTo?.id ?? finding?.assignedTo?.id
   const isAssignee = Boolean(currentUserId && assignedToId && currentUserId === assignedToId)
-  const canReview = userRoles.some((r) => ['SYSTEM_ADMIN', 'QUALITY_MANAGER', 'AUDITOR'].includes(r))
+  /** Only auditors of this finding's audit (or Quality Manager) can approve/reject CAP/CAT and extension requests. */
+  const canReviewCapCat = finding?.canReviewCapCat === true
   const assigneeDisplayName = assignee
     ? [assignee.firstName, assignee.lastName].filter(Boolean).join(' ').trim() || assignee.email || '—'
     : '—'
@@ -301,8 +302,8 @@ const FindingDetailPage = () => {
     }
   }
 
-  const canReviewCap = canReview && ca && (ca.capStatus === 'PENDING' || !ca.capStatus) && ca.actionPlan
-  const canReviewCat = canReview && ca && (ca.catStatus === 'PENDING' || !ca.catStatus) && (ca.correctiveActionTaken || uploadedFiles.length > 0)
+  const canReviewCap = canReviewCapCat && ca && (ca.capStatus === 'PENDING' || !ca.capStatus) && ca.actionPlan
+  const canReviewCat = canReviewCapCat && ca && (ca.catStatus === 'PENDING' || !ca.catStatus) && (ca.correctiveActionTaken || uploadedFiles.length > 0)
 
   if (loading) {
     return (
@@ -577,7 +578,7 @@ const FindingDetailPage = () => {
                     {req.status === 'REJECTED' && req.reviewNotes && (
                       <p className="text-red-700 text-xs">Review notes: {req.reviewNotes}</p>
                     )}
-                    {canReview && req.status === 'PENDING' && (
+                    {canReviewCapCat && req.status === 'PENDING' && (
                       <div className="flex gap-2 mt-2">
                         <Button
                           size="sm"

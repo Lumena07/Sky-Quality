@@ -1,19 +1,18 @@
 'use client'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { formatDate, formatDateTime } from '@/lib/utils'
-import { FileText, AlertCircle, CheckCircle, Download } from 'lucide-react'
+import { formatDate, formatDateOnly, formatDateTime } from '@/lib/utils'
+import { FileText, AlertCircle, CheckCircle, Download, Plus, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { FileUpload, FileList } from '@/components/ui/file-upload'
 import { AuditExecution } from '@/components/audits/audit-execution'
 import { MeetingAttendanceList } from '@/components/audits/meeting-attendance-list'
-import { downloadAuditReportPDF } from '@/lib/export/pdf'
 import {
   Dialog,
   DialogContent,
@@ -32,7 +31,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { isAdminOrQM } from '@/lib/permissions'
+import { canEditAudit } from '@/lib/permissions'
 
 /** Get CorrectiveAction from finding (handles API shape: array or single). */
 const getCorrectiveAction = (finding: Record<string, unknown>) => {
@@ -59,16 +58,22 @@ const AuditDetailPage = () => {
   const [rescheduleForm, setRescheduleForm] = useState({
     startDate: '',
     endDate: '',
-    openingMeetingAt: '',
-    closingMeetingAt: '',
-    scheduleNotes: '',
+    reason: '',
   })
   const [savingReschedule, setSavingReschedule] = useState(false)
+  const [rescheduleRequests, setRescheduleRequests] = useState<any[]>([])
+  const [timetableOpen, setTimetableOpen] = useState(false)
+  type ScheduleRow = { label: string; dayRef: string; time: string }
+  const [timetableItems, setTimetableItems] = useState<ScheduleRow[]>([])
+  const [timetableNotes, setTimetableNotes] = useState('')
+  const [savingTimetable, setSavingTimetable] = useState(false)
   const [openingAttendance, setOpeningAttendance] = useState<any[]>([])
   const [closingAttendance, setClosingAttendance] = useState<any[]>([])
   const [sendingToAuditee, setSendingToAuditee] = useState(false)
   const [closingNotesEdit, setClosingNotesEdit] = useState('')
   const [savingClosingNotes, setSavingClosingNotes] = useState(false)
+  const [closingNotesEditing, setClosingNotesEditing] = useState(false)
+  const [completingAudit, setCompletingAudit] = useState(false)
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -164,6 +169,21 @@ const AuditDetailPage = () => {
     return Array.isArray(raw) ? raw : []
   }
 
+  const fetchRescheduleRequests = async () => {
+    if (!params.id || typeof params.id !== 'string') return
+    try {
+      const res = await fetch(`/api/audits/${params.id}/reschedule-requests`, { credentials: 'same-origin' })
+      if (res.ok) {
+        const data = await res.json()
+        setRescheduleRequests(Array.isArray(data) ? data : [])
+      } else {
+        setRescheduleRequests([])
+      }
+    } catch {
+      setRescheduleRequests([])
+    }
+  }
+
   const fetchAudit = async () => {
     try {
       const res = await fetch(`/api/audits/${params.id}`)
@@ -179,6 +199,7 @@ const AuditDetailPage = () => {
         } else if (data.checklistId) {
           fetchSelectedChecklist(data.checklistId)
         }
+        fetchRescheduleRequests()
       }
     } catch (error) {
       console.error('Failed to fetch audit:', error)
@@ -333,81 +354,82 @@ const AuditDetailPage = () => {
   }
 
   const handleExportPDF = () => {
-    if (!audit) return
-
-    const auditStart = audit.startDate ?? audit.scheduledDate
-    const auditEnd = audit.endDate ?? audit.scheduledDate
-    const reportData = {
-      auditNumber: audit.auditNumber,
-      title: audit.title,
-      department: audit.department?.name || 'N/A',
-      base: audit.base,
-      scheduledDate: auditStart === auditEnd ? formatDate(auditStart) : `${formatDate(auditStart)} – ${formatDate(auditEnd)}`,
-      status: audit.status,
-      scope: audit.scope,
-      description: audit.description,
-      auditors: (audit.Auditors ?? audit.auditors ?? []).map((a: any) =>
-        a.Organization?.name ?? a.organization?.name
-          ? (a.Organization ?? a.organization).name
-          : a.User ?? a.user
-            ? `${(a.User ?? a.user).firstName} ${(a.User ?? a.user).lastName}`
-            : '—'
-      ),
-      auditees: (audit.Auditees ?? audit.auditees ?? []).map((a: any) =>
-        a.Organization?.name ?? a.organization?.name
-          ? (a.Organization ?? a.organization).name
-          : a.User ?? a.user
-            ? `${(a.User ?? a.user).firstName} ${(a.User ?? a.user).lastName}`
-            : a.name || a.email || '—'
-      ),
-      findings: (audit.Findings ?? audit.findings)?.map((f: any) => ({
-        findingNumber: f.findingNumber,
-        description: f.description,
-        severity: f.severity,
-        status: f.status,
-      })) || [],
-    }
-
-    downloadAuditReportPDF(reportData)
+    if (!audit || !params.id) return
+    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/audits/${params.id}/report?autoDownload=1`
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const handleRescheduleSubmit = async () => {
-    if (!audit) return
-    const start = rescheduleForm.startDate
-      ? new Date(rescheduleForm.startDate + 'T00:00:00').toISOString()
-      : undefined
-    const end = rescheduleForm.endDate
-      ? new Date(rescheduleForm.endDate + 'T23:59:59').toISOString()
-      : undefined
+    if (!audit || !params.id) return
     if (rescheduleForm.startDate && rescheduleForm.endDate && rescheduleForm.endDate < rescheduleForm.startDate) {
       alert('End date must be on or after start date')
       return
     }
     setSavingReschedule(true)
     try {
+      const res = await fetch(`/api/audits/${params.id}/reschedule-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestedStartDate: rescheduleForm.startDate,
+          requestedEndDate: rescheduleForm.endDate,
+          reason: rescheduleForm.reason?.trim() ?? '',
+        }),
+        credentials: 'same-origin',
+      })
+      if (res.ok) {
+        setRescheduleOpen(false)
+        setRescheduleForm((f) => ({ ...f, reason: '' }))
+        await fetchRescheduleRequests()
+        fetchAudit()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert((err as { error?: string }).error || 'Failed to submit reschedule request')
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Failed to submit reschedule request')
+    } finally {
+      setSavingReschedule(false)
+    }
+  }
+
+  const getAuditScheduleItems = (a: any): ScheduleRow[] => {
+    const raw = a?.ScheduleItems ?? a?.scheduleItems ?? a?.AuditScheduleItem ?? []
+    const arr = Array.isArray(raw) ? raw : []
+    return arr
+      .sort((x: { sortOrder?: number }, y: { sortOrder?: number }) => (x.sortOrder ?? 0) - (y.sortOrder ?? 0))
+      .map((item: { label?: string; dayRef?: string; time?: string }) => ({
+        label: String(item?.label ?? '').trim() || 'Item',
+        dayRef: String(item?.dayRef ?? '1'),
+        time: String(item?.time ?? '09:00').slice(0, 5),
+      }))
+  }
+
+  const handleTimetableSubmit = async () => {
+    if (!audit) return
+    setSavingTimetable(true)
+    try {
       const res = await fetch(`/api/audits/${params.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          startDate: start,
-          endDate: end,
-          openingMeetingAt: rescheduleForm.openingMeetingAt || null,
-          closingMeetingAt: rescheduleForm.closingMeetingAt || null,
-          scheduleNotes: rescheduleForm.scheduleNotes || null,
+          scheduleItems: timetableItems.filter((r) => r.label.trim()),
+          scheduleNotes: timetableNotes.trim() || null,
         }),
       })
       if (res.ok) {
-        setRescheduleOpen(false)
+        setTimetableOpen(false)
         fetchAudit()
       } else {
         const err = await res.json()
-        alert(err.error || 'Failed to update schedule')
+        alert(err.error || 'Failed to save timetable')
       }
     } catch (e) {
       console.error(e)
-      alert('Failed to update schedule')
+      alert('Failed to save timetable')
     } finally {
-      setSavingReschedule(false)
+      setSavingTimetable(false)
     }
   }
 
@@ -449,10 +471,13 @@ const AuditDetailPage = () => {
   const isERP = audit.type === 'ERP'
   const auditorUserIds = (audit.Auditors ?? audit.auditors ?? []).map(
     (a: { userId?: string; User?: { id: string } }) => a.userId ?? a.User?.id
-  )
-  const canEditAudit =
+  ).filter(Boolean) as string[]
+  const auditeeUserIds = (audit.Auditees ?? audit.auditees ?? []).map(
+    (a: { userId?: string; User?: { id: string } }) => a.userId ?? a.User?.id
+  ).filter(Boolean) as string[]
+  const canEditAuditValue =
     me &&
-    (isAdminOrQM(me.roles) || (me.roles.some((r) => r === 'AUDITOR') && auditorUserIds.includes(me.id)))
+    canEditAudit(me.roles, me.id, auditorUserIds, auditeeUserIds)
 
   return (
     <MainLayout>
@@ -528,8 +553,8 @@ const AuditDetailPage = () => {
                     <p className="font-medium">
                       {audit.startDate && audit.endDate
                         ? (() => {
-                            const start = formatDate(audit.startDate)
-                            const end = formatDate(audit.endDate)
+                            const start = formatDateOnly(String(audit.startDate))
+                            const end = formatDateOnly(String(audit.endDate))
                             return start === end ? start : `${start} – ${end}`
                           })()
                         : formatDate(audit.scheduledDate)}
@@ -554,51 +579,119 @@ const AuditDetailPage = () => {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {!isERP && (
-                    <Button className="w-full" variant="outline" onClick={handleExportPDF}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Export PDF Report
-                    </Button>
+                    <>
+                      <Link href={`/audits/${params.id}/report`}>
+                        <Button className="w-full" variant="outline">
+                          <FileText className="mr-2 h-4 w-4" />
+                          View Report
+                        </Button>
+                      </Link>
+                      <Button className="w-full" variant="outline" onClick={handleExportPDF}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Export PDF Report
+                      </Button>
+                    </>
                   )}
-                  {audit.status === 'PLANNED' && canEditAudit && (
-                    <Button className="w-full" variant="default" onClick={handleStartAudit}>
-                      {isERP ? 'Start' : 'Start Audit'}
-                    </Button>
-                  )}
-                  {audit.status === 'ACTIVE' && canEditAudit && (
-                    <Button className="w-full" variant="default">
-                      Complete Audit
-                    </Button>
-                  )}
-                  {(audit.status === 'PLANNED' || audit.status === 'ACTIVE') && canEditAudit && (
-                    <Button
-                      className="w-full"
-                      variant="outline"
-                      onClick={() => {
-                        const start = audit.startDate ?? audit.scheduledDate
-                        const end = audit.endDate ?? audit.scheduledDate
-                        const toLocalDatetime = (d: string | undefined) => {
-                          if (!d) return ''
-                          const date = new Date(d)
-                          const y = date.getFullYear()
-                          const m = String(date.getMonth() + 1).padStart(2, '0')
-                          const day = String(date.getDate()).padStart(2, '0')
-                          const h = String(date.getHours()).padStart(2, '0')
-                          const min = String(date.getMinutes()).padStart(2, '0')
-                          return `${y}-${m}-${day}T${h}:${min}`
-                        }
-                        setRescheduleForm({
-                          startDate: start ? formatDate(start) : '',
-                          endDate: end ? formatDate(end) : '',
-                          openingMeetingAt: audit.openingMeetingAt ? toLocalDatetime(audit.openingMeetingAt) : '',
-                          closingMeetingAt: audit.closingMeetingAt ? toLocalDatetime(audit.closingMeetingAt) : '',
-                          scheduleNotes: audit.scheduleNotes ?? '',
-                        })
-                        setRescheduleOpen(true)
-                      }}
-                    >
-                      Reschedule
-                    </Button>
-                  )}
+                  {audit.status === 'PLANNED' && canEditAuditValue && (() => {
+                    const pendingReschedule = rescheduleRequests.some((r: { status: string }) => r.status === 'PENDING')
+                    return (
+                      <>
+                        <Button
+                          className="w-full"
+                          variant="default"
+                          disabled={
+                            (!isERP && !audit?.checklistScheduleSentAt) || pendingReschedule
+                          }
+                          onClick={handleStartAudit}
+                        >
+                          {isERP ? 'Start' : 'Start Audit'}
+                        </Button>
+                        {pendingReschedule && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            The audit cannot be started until the Accountable Manager approves or rejects the reschedule request.
+                          </p>
+                        )}
+                        {!isERP && !audit?.checklistScheduleSentAt && !pendingReschedule && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Send the checklist and schedule to auditees first (Audit Schedule tab).
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
+                  {audit.status === 'ACTIVE' && canEditAuditValue && (() => {
+                    const findings = audit?.Findings ?? audit?.findings ?? []
+                    const allFindingsClosed =
+                      findings.length === 0 ||
+                      findings.every((f: { status?: string }) => f.status === 'CLOSED')
+                    return (
+                      <>
+                        <Button
+                          className="w-full"
+                          variant="default"
+                          disabled={!allFindingsClosed || completingAudit}
+                          onClick={async () => {
+                            setCompletingAudit(true)
+                            try {
+                              const res = await fetch(`/api/audits/${params.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'COMPLETED' }),
+                              })
+                              if (res.ok) {
+                                await fetchAudit()
+                              } else {
+                                const data = await res.json().catch(() => ({}))
+                                alert((data as { error?: string }).error ?? 'Failed to complete audit.')
+                              }
+                            } catch {
+                              alert('Failed to complete audit. Please try again.')
+                            } finally {
+                              setCompletingAudit(false)
+                            }
+                          }}
+                        >
+                          {completingAudit ? 'Completing…' : 'Complete Audit'}
+                        </Button>
+                        {!allFindingsClosed && findings.length > 0 && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Close all findings before completing the audit.
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
+                  {audit.status === 'PLANNED' && canEditAuditValue && (() => {
+                    const pendingReschedule = rescheduleRequests.some((r: { status: string }) => r.status === 'PENDING')
+                    return (
+                      <>
+                        <Button
+                          className="w-full"
+                          variant="outline"
+                          disabled={pendingReschedule}
+                          onClick={() => {
+                            const start = audit.startDate ?? audit.scheduledDate
+                            const end = audit.endDate ?? audit.scheduledDate
+                            const toDateOnly = (d: string | undefined) =>
+                              d ? String(d).slice(0, 10) : ''
+                            setRescheduleForm({
+                              startDate: toDateOnly(start),
+                              endDate: toDateOnly(end),
+                              reason: '',
+                            })
+                            setRescheduleOpen(true)
+                          }}
+                        >
+                          Request reschedule
+                        </Button>
+                        {pendingReschedule && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Reschedule request pending. Waiting for Accountable Manager approval.
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
                 </CardContent>
               </Card>
             </div>
@@ -610,31 +703,14 @@ const AuditDetailPage = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Audit Schedule</CardTitle>
-                  {audit.status === 'PLANNED' && canEditAudit && (
+                  {audit.status === 'PLANNED' && canEditAuditValue && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const start = audit.startDate ?? audit.scheduledDate
-                        const end = audit.endDate ?? audit.scheduledDate
-                        const toLocalDatetime = (d: string | undefined) => {
-                          if (!d) return ''
-                          const date = new Date(d)
-                          const y = date.getFullYear()
-                          const m = String(date.getMonth() + 1).padStart(2, '0')
-                          const day = String(date.getDate()).padStart(2, '0')
-                          const h = String(date.getHours()).padStart(2, '0')
-                          const min = String(date.getMinutes()).padStart(2, '0')
-                          return `${y}-${m}-${day}T${h}:${min}`
-                        }
-                        setRescheduleForm({
-                          startDate: start ? formatDate(start) : '',
-                          endDate: end ? formatDate(end) : '',
-                          openingMeetingAt: audit.openingMeetingAt ? toLocalDatetime(audit.openingMeetingAt) : '',
-                          closingMeetingAt: audit.closingMeetingAt ? toLocalDatetime(audit.closingMeetingAt) : '',
-                          scheduleNotes: audit.scheduleNotes ?? '',
-                        })
-                        setRescheduleOpen(true)
+                        setTimetableItems(getAuditScheduleItems(audit))
+                        setTimetableNotes(audit.scheduleNotes ?? '')
+                        setTimetableOpen(true)
                       }}
                     >
                       Edit schedule
@@ -643,61 +719,106 @@ const AuditDetailPage = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Opening meeting</p>
-                    <p className="font-medium">
-                      {audit.openingMeetingAt
-                        ? formatDateTime(audit.openingMeetingAt)
-                        : '—'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Closing meeting</p>
-                    <p className="font-medium">
-                      {audit.closingMeetingAt
-                        ? formatDateTime(audit.closingMeetingAt)
-                        : '—'}
-                    </p>
-                  </div>
-                </div>
-                {audit.scheduleNotes && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Schedule notes</p>
-                    <p className="font-medium whitespace-pre-wrap">{audit.scheduleNotes}</p>
-                  </div>
-                )}
-                {!audit.openingMeetingAt && !audit.closingMeetingAt && !audit.scheduleNotes && (
-                  <p className="text-sm text-muted-foreground">
-                    No schedule details yet. Use Edit schedule or Reschedule from Overview to add opening/closing meeting times and notes.
-                  </p>
-                )}
-                {audit.status === 'PLANNED' && canEditAudit && (
-                  <Button
-                    className="w-full mt-4"
-                    variant="secondary"
-                    disabled={sendingToAuditee}
-                    onClick={async () => {
-                      setSendingToAuditee(true)
-                      try {
-                        const res = await fetch(`/api/audits/${params.id}/send-to-auditee`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                        })
-                        const data = await res.json().catch(() => ({}))
-                        if (res.ok) {
-                          alert(data.message ?? 'Checklist and schedule sent to auditees.')
-                        } else {
-                          alert(data.error ?? 'Failed to send')
-                        }
-                      } finally {
-                        setSendingToAuditee(false)
-                      }
-                    }}
-                  >
-                    {sendingToAuditee ? 'Sending...' : 'Send checklist & schedule to auditee'}
-                  </Button>
-                )}
+                {(() => {
+                  const items = getAuditScheduleItems(audit)
+                  const dayLabel = (ref: string) => (ref === 'last' ? 'Last day' : `Day ${ref}`)
+                  return (
+                    <>
+                      {items.length > 0 ? (
+                        <div className="rounded-md border">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b bg-muted/50">
+                                <th className="px-4 py-2 text-left font-medium">Item</th>
+                                <th className="px-4 py-2 text-left font-medium">Day</th>
+                                <th className="px-4 py-2 text-left font-medium">Time</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {items.map((row, i) => (
+                                <tr key={i} className="border-b last:border-0">
+                                  <td className="px-4 py-2">{row.label}</td>
+                                  <td className="px-4 py-2">{dayLabel(row.dayRef)}</td>
+                                  <td className="px-4 py-2">{row.time}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : null}
+                      {items.length === 0 && (audit.openingMeetingAt || audit.closingMeetingAt) ? (
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {audit.openingMeetingAt && (
+                            <div>
+                              <p className="text-sm text-muted-foreground">Opening meeting</p>
+                              <p className="font-medium">{formatDateTime(audit.openingMeetingAt)}</p>
+                            </div>
+                          )}
+                          {audit.closingMeetingAt && (
+                            <div>
+                              <p className="text-sm text-muted-foreground">Closing meeting</p>
+                              <p className="font-medium">{formatDateTime(audit.closingMeetingAt)}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                      {audit.scheduleNotes && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Additional notes</p>
+                          <p className="font-medium whitespace-pre-wrap">{audit.scheduleNotes}</p>
+                        </div>
+                      )}
+                      {items.length === 0 && !audit.openingMeetingAt && !audit.closingMeetingAt && !audit.scheduleNotes && (
+                        <p className="text-sm text-muted-foreground">
+                          No timetable yet. Use Edit schedule to add items (e.g. Opening meeting Day 1, Closing meeting Last day) and times.
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
+                {audit.status === 'PLANNED' && canEditAuditValue && (() => {
+                  const hasChecklist = !!audit?.checklistId
+                  const hasSchedule =
+                    getAuditScheduleItems(audit).length > 0 ||
+                    !!audit?.openingMeetingAt ||
+                    !!audit?.closingMeetingAt
+                  const canSendToAuditee = hasChecklist && hasSchedule
+                  return (
+                    <>
+                      <Button
+                        className="w-full mt-4"
+                        variant="secondary"
+                        disabled={!canSendToAuditee || sendingToAuditee}
+                        onClick={async () => {
+                          setSendingToAuditee(true)
+                          try {
+                            const res = await fetch(`/api/audits/${params.id}/send-to-auditee`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                            })
+                            const data = await res.json().catch(() => ({}))
+                            if (res.ok) {
+                              alert(data.message ?? 'Checklist and schedule sent to auditees.')
+                              fetchAudit()
+                            } else {
+                              alert(data.error ?? 'Failed to send')
+                            }
+                          } finally {
+                            setSendingToAuditee(false)
+                          }
+                        }}
+                      >
+                        {sendingToAuditee ? 'Sending...' : 'Send checklist & schedule to auditee'}
+                      </Button>
+                      {!canSendToAuditee && !sendingToAuditee && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          Select a checklist and add schedule details (e.g. via Edit schedule) before
+                          sending to auditees.
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
               </CardContent>
             </Card>
           </TabsContent>
@@ -711,9 +832,7 @@ const AuditDetailPage = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  {audit.openingMeetingAt
-                    ? formatDateTime(audit.openingMeetingAt)
-                    : 'Date/time not set — update in Audit Schedule.'}
+                  {audit.openingMeetingAt ? formatDateTime(audit.openingMeetingAt) : ''}
                 </p>
                 <div>
                   <p className="text-sm font-medium mb-2">Attendance</p>
@@ -721,7 +840,7 @@ const AuditDetailPage = () => {
                     auditId={params.id as string}
                     meetingType="OPENING"
                     attendance={openingAttendance}
-                    canEdit={canEditAudit}
+                    canEdit={canEditAuditValue}
                     onRefresh={fetchOpeningAttendance}
                     meId={me?.id}
                   />
@@ -739,9 +858,7 @@ const AuditDetailPage = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  {audit.closingMeetingAt
-                    ? formatDateTime(audit.closingMeetingAt)
-                    : 'Date/time not set — update in Audit Schedule.'}
+                  {audit.closingMeetingAt ? formatDateTime(audit.closingMeetingAt) : ''}
                 </p>
                 <div>
                   <p className="text-sm font-medium mb-2">Findings summary</p>
@@ -753,34 +870,58 @@ const AuditDetailPage = () => {
                 </div>
                 <div>
                   <p className="text-sm font-medium mb-1">Closing meeting notes</p>
-                  {canEditAudit ? (
-                    <div className="space-y-2">
-                      <Textarea
-                        value={closingNotesEdit}
-                        placeholder="Discussion summary, action items..."
-                        className="min-h-[100px]"
-                        onChange={(e) => setClosingNotesEdit(e.target.value)}
-                      />
-                      <Button
-                        size="sm"
-                        disabled={savingClosingNotes}
-                        onClick={async () => {
-                          setSavingClosingNotes(true)
-                          try {
-                            const res = await fetch(`/api/audits/${params.id}`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ closingMeetingNotes: closingNotesEdit.trim() || null }),
-                            })
-                            if (res.ok) fetchAudit()
-                          } finally {
-                            setSavingClosingNotes(false)
-                          }
-                        }}
-                      >
-                        {savingClosingNotes ? 'Saving...' : 'Save notes'}
-                      </Button>
-                    </div>
+                  {canEditAuditValue ? (
+                    (audit.closingMeetingNotes && !closingNotesEditing) ? (
+                      <div className="space-y-2">
+                        <p className="text-sm whitespace-pre-wrap">{audit.closingMeetingNotes}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setClosingNotesEditing(true)}
+                          aria-label="Edit closing meeting notes"
+                        >
+                          Edit
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Textarea
+                          value={closingNotesEdit}
+                          placeholder="Discussion summary, action items..."
+                          className="min-h-[100px]"
+                          onChange={(e) => setClosingNotesEdit(e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={savingClosingNotes}
+                          onClick={async () => {
+                            setSavingClosingNotes(true)
+                            try {
+                              const res = await fetch(`/api/audits/${params.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ closingMeetingNotes: closingNotesEdit.trim() || null }),
+                              })
+                              if (res.ok) {
+                                await fetchAudit()
+                                setClosingNotesEditing(false)
+                              } else {
+                                const data = await res.json().catch(() => ({}))
+                                alert((data as { error?: string }).error ?? 'Failed to save closing meeting notes.')
+                              }
+                            } catch {
+                              alert('Failed to save closing meeting notes. Please check your connection and try again.')
+                            } finally {
+                              setSavingClosingNotes(false)
+                            }
+                          }}
+                        >
+                          {savingClosingNotes ? 'Saving...' : 'Save notes'}
+                        </Button>
+                      </div>
+                    )
                   ) : (
                     <p className="text-sm whitespace-pre-wrap">{audit.closingMeetingNotes || '—'}</p>
                   )}
@@ -791,7 +932,7 @@ const AuditDetailPage = () => {
                     auditId={params.id as string}
                     meetingType="CLOSING"
                     attendance={closingAttendance}
-                    canEdit={canEditAudit}
+                    canEdit={canEditAuditValue}
                     onRefresh={fetchClosingAttendance}
                     meId={me?.id}
                   />
@@ -807,7 +948,7 @@ const AuditDetailPage = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Checklist</CardTitle>
-                  {canEditAudit && (
+                  {canEditAuditValue && (
                     <Link href="/checklists">
                       <Button variant="outline" size="sm">
                         Manage Checklists
@@ -829,7 +970,7 @@ const AuditDetailPage = () => {
                   <Select
                     value={audit?.checklistId || 'none'}
                     onValueChange={handleChecklistChange}
-                    disabled={savingChecklist || !canEditAudit}
+                    disabled={savingChecklist || !canEditAuditValue}
                   >
                     <SelectTrigger id="checklist-select" className="w-full">
                       <SelectValue placeholder="Select a checklist" />
@@ -1166,9 +1307,9 @@ const AuditDetailPage = () => {
         <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Reschedule audit</DialogTitle>
+              <DialogTitle>Request reschedule</DialogTitle>
               <DialogDescription>
-                Update audit period and opening/closing meeting times.
+                Request new start and end dates for the audit. The Accountable Manager must approve or reject the request. Use Audit Schedule tab to edit the timetable (opening/closing meeting times).
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-2">
@@ -1182,6 +1323,7 @@ const AuditDetailPage = () => {
                     onChange={(e) =>
                       setRescheduleForm((f) => ({ ...f, startDate: e.target.value }))
                     }
+                    aria-label="Requested audit start date"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1193,49 +1335,171 @@ const AuditDetailPage = () => {
                     onChange={(e) =>
                       setRescheduleForm((f) => ({ ...f, endDate: e.target.value }))
                     }
+                    aria-label="Requested audit end date"
                   />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="reschedule-opening">Opening meeting</Label>
-                <Input
-                  id="reschedule-opening"
-                  type="datetime-local"
-                  value={rescheduleForm.openingMeetingAt}
-                  onChange={(e) =>
-                    setRescheduleForm((f) => ({ ...f, openingMeetingAt: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reschedule-closing">Closing meeting</Label>
-                <Input
-                  id="reschedule-closing"
-                  type="datetime-local"
-                  value={rescheduleForm.closingMeetingAt}
-                  onChange={(e) =>
-                    setRescheduleForm((f) => ({ ...f, closingMeetingAt: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reschedule-notes">Schedule notes</Label>
+                <Label htmlFor="reschedule-reason">Reason *</Label>
                 <Textarea
-                  id="reschedule-notes"
-                  value={rescheduleForm.scheduleNotes}
+                  id="reschedule-reason"
+                  value={rescheduleForm.reason}
                   onChange={(e) =>
-                    setRescheduleForm((f) => ({ ...f, scheduleNotes: e.target.value }))
+                    setRescheduleForm((f) => ({ ...f, reason: e.target.value }))
                   }
-                  placeholder="Process steps, agenda..."
-                  className="min-h-[80px]"
+                  placeholder="Why is this reschedule needed?"
+                  aria-required="true"
+                  rows={2}
+                  className="resize-none"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setRescheduleOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleRescheduleSubmit} disabled={savingReschedule}>
-                  {savingReschedule ? 'Saving...' : 'Save'}
+                <Button
+                  onClick={handleRescheduleSubmit}
+                  disabled={
+                    savingReschedule ||
+                    !rescheduleForm.startDate ||
+                    !rescheduleForm.endDate ||
+                    !rescheduleForm.reason?.trim()
+                  }
+                >
+                  {savingReschedule ? 'Submitting…' : 'Submit request'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={timetableOpen} onOpenChange={setTimetableOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit audit timetable</DialogTitle>
+              <DialogDescription>
+                Define schedule items with day and time (e.g. Opening meeting on Day 1, Closing meeting on Last day). Opening and closing meeting times are used for the meeting tabs and notifications.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Timetable items</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setTimetableItems((prev) => [...prev, { label: '', dayRef: '1', time: '09:00' }])
+                    }
+                    aria-label="Add timetable item"
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add row
+                  </Button>
+                </div>
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-2 py-2 text-left font-medium">Item</th>
+                        <th className="px-2 py-2 text-left font-medium w-[120px]">Day</th>
+                        <th className="px-2 py-2 text-left font-medium w-[90px]">Time</th>
+                        <th className="w-10" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {timetableItems.map((row, i) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="px-2 py-1">
+                            <Input
+                              value={row.label}
+                              onChange={(e) =>
+                                setTimetableItems((prev) =>
+                                  prev.map((r, j) => (j === i ? { ...r, label: e.target.value } : r))
+                                )
+                              }
+                              placeholder="e.g. Opening meeting, Closing meeting"
+                              className="h-8"
+                              aria-label={`Item label row ${i + 1}`}
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <Select
+                              value={row.dayRef}
+                              onValueChange={(v) =>
+                                setTimetableItems((prev) =>
+                                  prev.map((r, j) => (j === i ? { ...r, dayRef: v } : r))
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-8" aria-label={`Day row ${i + 1}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((d) => (
+                                  <SelectItem key={d} value={d}>
+                                    Day {d}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value="last">Last day</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="px-2 py-1">
+                            <Input
+                              type="time"
+                              value={row.time}
+                              onChange={(e) =>
+                                setTimetableItems((prev) =>
+                                  prev.map((r, j) => (j === i ? { ...r, time: e.target.value } : r))
+                                )
+                              }
+                              className="h-8"
+                              aria-label={`Time row ${i + 1}`}
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() =>
+                                setTimetableItems((prev) => prev.filter((_, j) => j !== i))
+                              }
+                              aria-label={`Remove row ${i + 1}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {timetableItems.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Add at least one item (e.g. Opening meeting, Day 1, 09:00).
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="timetable-notes">Additional notes</Label>
+                <Textarea
+                  id="timetable-notes"
+                  value={timetableNotes}
+                  onChange={(e) => setTimetableNotes(e.target.value)}
+                  placeholder="Process steps, agenda, or other notes..."
+                  className="min-h-[80px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setTimetableOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleTimetableSubmit} disabled={savingTimetable}>
+                  {savingTimetable ? 'Saving...' : 'Save'}
                 </Button>
               </div>
             </div>

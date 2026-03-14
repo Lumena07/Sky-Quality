@@ -4,6 +4,13 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { SignaturePad } from '@/components/audits/signature-pad'
 import { formatDateTime } from '@/lib/utils'
 
 type AttendanceRow = {
@@ -11,6 +18,7 @@ type AttendanceRow = {
   name: string | null
   roleOrTitle: string | null
   signedAt: string | null
+  signatureData: string | null
   userId: string | null
   User?: { firstName?: string; lastName?: string; email?: string } | null
 }
@@ -36,6 +44,7 @@ export const MeetingAttendanceList = ({
   const [addRole, setAddRole] = useState('')
   const [adding, setAdding] = useState(false)
   const [signingId, setSigningId] = useState<string | null>(null)
+  const [signDialogAttendanceId, setSignDialogAttendanceId] = useState<string | null>(null)
 
   const handleAdd = async () => {
     if (!addName.trim()) return
@@ -63,15 +72,22 @@ export const MeetingAttendanceList = ({
     }
   }
 
-  const handleSign = async (attendanceId: string) => {
-    setSigningId(attendanceId)
+  const handleOpenSignDialog = (attendanceId: string) => {
+    setSignDialogAttendanceId(attendanceId)
+  }
+
+  const handleSignConfirm = async (signatureDataUrl: string | null) => {
+    const attendanceIdToSign = signDialogAttendanceId
+    if (!attendanceIdToSign) return
+    setSignDialogAttendanceId(null)
+    setSigningId(attendanceIdToSign)
     try {
       const res = await fetch(
-        `/api/audits/${auditId}/meetings/attendance/${attendanceId}/sign`,
+        `/api/audits/${auditId}/meetings/attendance/${attendanceIdToSign}/sign`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ signatureData: signatureDataUrl }),
         }
       )
       if (res.ok) {
@@ -85,6 +101,10 @@ export const MeetingAttendanceList = ({
     }
   }
 
+  const handleSignCancel = () => {
+    setSignDialogAttendanceId(null)
+  }
+
   const displayName = (row: AttendanceRow) => {
     if (row.name) return row.name
     if (row.User) {
@@ -95,6 +115,18 @@ export const MeetingAttendanceList = ({
 
   return (
     <div className="space-y-4">
+      <Dialog open={!!signDialogAttendanceId} onOpenChange={(open) => !open && handleSignCancel()}>
+        <DialogContent className="sm:max-w-md" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>Sign attendance</DialogTitle>
+          </DialogHeader>
+          <SignaturePad
+            onConfirm={handleSignConfirm}
+            onCancel={handleSignCancel}
+            disabled={!!signingId}
+          />
+        </DialogContent>
+      </Dialog>
       {canEdit && (
         <div className="flex flex-wrap items-end gap-2 p-3 border rounded-lg bg-muted/30">
           <div className="flex-1 min-w-[120px] space-y-1">
@@ -152,9 +184,18 @@ export const MeetingAttendanceList = ({
                   <td className="px-3 py-2">{row.roleOrTitle || '—'}</td>
                   <td className="px-3 py-2">
                     {row.signedAt ? (
-                      <span className="text-green-600">
-                        {formatDateTime(row.signedAt)}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-green-600">
+                          {formatDateTime(row.signedAt)}
+                        </span>
+                        {row.signatureData && (
+                          <img
+                            src={row.signatureData}
+                            alt="Signature"
+                            className="h-8 max-w-[120px] object-contain border border-border rounded"
+                          />
+                        )}
+                      </div>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -165,7 +206,7 @@ export const MeetingAttendanceList = ({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleSign(row.id)}
+                          onClick={() => handleOpenSignDialog(row.id)}
                           disabled={signingId === row.id}
                         >
                           {signingId === row.id ? 'Signing...' : 'Sign'}

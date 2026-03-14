@@ -1,0 +1,416 @@
+/* Professional corporate aviation audit report – screen and print */
+
+.audit-report {
+  --report-bg: #ffffff;
+  --report-text: #1a1a1a;
+  --report-text-muted: #4a4a4a;
+  --report-border: #e0e0e0;
+  --report-section-bg: #f8f9fa;
+  --report-accent: #1e3a5f;
+  --report-accent-teal: #2d5a5a;
+  --report-compliant: #1a6b3c;
+  --report-noncompliant: #a63d3d;
+  --report-partial: #8a6b1a;
+  --report-neutral: #5a5a5a;
+  --report-p1: #8b2942;
+  --report-p2: #7c5a2b;
+  --report-p3: #3d5a6b;
+  --report-radius: 4px;
+  --report-spacing: 1.25rem;
+  --report-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  background: var(--report-bg);
+  color: var(--report-text);
+  font-family: var(--report-font);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: var(--report-spacing);
+  box-sizing: border-box;
+}
+
+.audit-report *,
+.audit-report *::before,
+.audit-report *::after {
+  box-sizing: border-box;
+}
+
+/* Header */
+.report-header {
+  text-align: center;
+  padding-bottom: var(--report-spacing);
+  margin-bottom: var(--report-spacing);
+  border-bottom: 2px solid var(--report-border);
+}
+
+.report-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--report-accent);
+  letter-spacing: 0.02em;
+}
+
+/* Main */
+.report-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-spacing);
+}
+
+/* Sections */
+.report-section {
+  background: var(--report-section-bg);
+  border: 1px solid var(--report-border);
+  border-radius: var(--report-radius);
+  padding: var(--report-spacing);
+  break-inside: avoid;
+}
+
+.report-section-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--report-accent);
+  letter-spacing: 0.01em;
+}
+
+.report-body-text {
+  margin: 0 0 0.5rem 0;
+  color: var(--report-text);
+}
+
+.report-body-text:last-child {
+  margin-bottom: 0;
+}
+
+/* Audit Details grid */
+.report-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1.5rem;
+}
+
+.report-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.report-detail-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--report-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.report-detail-value {
+  font-size: 0.95rem;
+  color: var(--report-text);
+}
+
+/* Audit Team */
+.report-team-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Executive Summary */
+.report-section-summary {
+  background: linear-gradient(to bottom, #f0f3f5, var(--report-section-bg));
+}
+
+.report-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.report-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.report-compliance-summary {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--report-border);
+}
+
+/* Checklist cards */
+.report-checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-spacing);
+}
+
+.report-card {
+  background: var(--report-bg);
+  border: 1px solid var(--report-border);
+  border-radius: var(--report-radius);
+  overflow: hidden;
+  break-inside: avoid;
+}
+
+.report-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem var(--report-spacing);
+  background: var(--report-section-bg);
+  border-bottom: 1px solid var(--report-border);
+}
+
+.report-card-item-num {
+  font-weight: 700;
+  color: var(--report-accent);
+  font-size: 0.95rem;
+}
+
+.report-card-ref {
+  font-size: 0.9rem;
+  color: var(--report-text-muted);
+}
+
+.report-card-body {
+  padding: var(--report-spacing);
+}
+
+.report-card-label {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--report-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.report-card-question {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.95rem;
+  color: var(--report-text);
+  line-height: 1.5;
+}
+
+.report-card-meta {
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.report-card-meta:last-of-type {
+  margin-bottom: 0.75rem;
+}
+
+.report-meta-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--report-text-muted);
+  min-width: 6rem;
+}
+
+.report-meta-value {
+  font-size: 0.9rem;
+  color: var(--report-text);
+}
+
+/* Badges */
+.report-badge {
+  display: inline-block;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.report-badge-compliant {
+  background: #d4edda;
+  color: var(--report-compliant);
+  border: 1px solid #a3d9a5;
+}
+
+.report-badge-noncompliant {
+  background: #f8d7da;
+  color: var(--report-noncompliant);
+  border: 1px solid #f1aeb5;
+}
+
+.report-badge-partial {
+  background: #fff3cd;
+  color: var(--report-partial);
+  border: 1px solid #e6c97a;
+}
+
+.report-badge-neutral {
+  background: #e9ecef;
+  color: var(--report-neutral);
+  border: 1px solid #ced4da;
+}
+
+.report-badge-priority,
+.report-badge-p1,
+.report-badge-p2,
+.report-badge-p3 {
+  background: #e9ecef;
+  color: var(--report-text-muted);
+  border: 1px solid var(--report-border);
+}
+
+.report-badge-p1 {
+  background: #f5e0e4;
+  color: var(--report-p1);
+  border-color: #e4b8c0;
+}
+
+.report-badge-p2 {
+  background: #f0ebe0;
+  color: var(--report-p2);
+  border-color: #d4c9a8;
+}
+
+.report-badge-p3 {
+  background: #e0eaf0;
+  color: var(--report-p3);
+  border-color: #b8d0e4;
+}
+
+/* Objective Evidence */
+.report-card-evidence {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--report-border);
+}
+
+/* Findings list */
+.report-card-findings {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--report-border);
+}
+
+.report-findings-list {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+  list-style: none;
+}
+
+.report-finding-item {
+  margin-bottom: 0.75rem;
+  padding-left: 0.5rem;
+  border-left: 3px solid var(--report-noncompliant);
+  background: #fdf8f8;
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  border-radius: 0 var(--report-radius) var(--report-radius) 0;
+}
+
+.report-finding-item:last-child {
+  margin-bottom: 0;
+}
+
+.report-finding-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.report-finding-number {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--report-accent);
+}
+
+.report-finding-description {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--report-text);
+  line-height: 1.45;
+}
+
+/* Footer */
+.report-footer {
+  margin-top: 2rem;
+  padding-top: var(--report-spacing);
+  border-top: 1px solid var(--report-border);
+  text-align: center;
+}
+
+.report-footer-text {
+  margin: 0.25rem 0;
+  font-size: 0.8rem;
+  color: var(--report-text-muted);
+}
+
+.report-page-info {
+  font-style: italic;
+}
+
+/* Print */
+@media print {
+  .audit-report {
+    max-width: none;
+    padding: 15mm;
+    background: #fff;
+    font-size: 11pt;
+  }
+
+  .report-header {
+    padding-bottom: 12pt;
+    margin-bottom: 12pt;
+  }
+
+  .report-title {
+    font-size: 18pt;
+  }
+
+  .report-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    padding: 10pt;
+  }
+
+  .report-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .report-footer {
+    margin-top: 15pt;
+    padding-top: 10pt;
+  }
+
+  .report-badge {
+    padding: 0.4rem 0.85rem;
+  }
+
+  .report-badge-compliant {
+    background: #d4edda;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .report-badge-noncompliant {
+    background: #f8d7da;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .report-finding-item {
+    background: #fdf8f8;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+}

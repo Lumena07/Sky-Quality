@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
 
 export async function GET(
   request: Request,
@@ -54,6 +55,26 @@ export async function POST(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors assigned to this audit can modify the checklist' },
+        { status: 403 }
+      )
     }
 
     const body = await request.json()
@@ -121,6 +142,26 @@ export async function PUT(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors assigned to this audit can modify the checklist' },
+        { status: 403 }
+      )
     }
 
     const body = await request.json()

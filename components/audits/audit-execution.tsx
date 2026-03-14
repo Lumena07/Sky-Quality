@@ -40,13 +40,29 @@ interface ChecklistResponseFinding {
   priority: string
   assignedToId: string
   status: string
+  classificationId?: string | null
 }
+
+interface FindingClassification {
+  id: string
+  group: string
+  code: string
+  name: string
+}
+
+const DOCUMENTED_IMPLEMENTED_STATUS_OPTIONS = [
+  { value: 'DOCUMENTED_IMPLEMENTED', label: 'Documented and Implemented' },
+  { value: 'DOCUMENTED_NOT_IMPLEMENTED', label: 'Documented and Not Implemented' },
+  { value: 'NOT_DOCUMENTED_IMPLEMENTED', label: 'Not Documented and Implemented' },
+  { value: 'NOT_DOCUMENTED_NOT_IMPLEMENTED', label: 'Not Documented and Not Implemented' },
+] as const
 
 interface ChecklistResponse {
   id: string
   checklistItemId: string
   isCompliant: boolean | null
   notes: string | null
+  documentedImplementedStatus?: string | null
   reviewedAt: string
   findings?: ChecklistResponseFinding[]
   // Supabase join can come back as Evidence or evidence; we normalize it
@@ -89,6 +105,9 @@ export const AuditExecution = ({
   const [saving, setSaving] = useState(false)
   const [collapsedItemIds, setCollapsedItemIds] = useState<string[]>([])
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
+  const [draftDocumentedImplementedStatus, setDraftDocumentedImplementedStatus] = useState<
+    Record<string, string | null>
+  >({})
   const [responseMap, setResponseMap] = useState<Map<string, ChecklistResponse>>(new Map())
   const [evidenceFeedback, setEvidenceFeedback] = useState<{
     itemId: string
@@ -152,6 +171,8 @@ export const AuditExecution = ({
           checklistItemId: itemId,
           isCompliant,
           notes: response?.notes ?? null,
+          documentedImplementedStatus:
+            draftDocumentedImplementedStatus[itemId] ?? response?.documentedImplementedStatus ?? null,
         }),
       })
       if (res.ok) {
@@ -172,6 +193,8 @@ export const AuditExecution = ({
       alert('Objective Evidence & Notes is required.')
       return
     }
+    const statusToSave =
+      draftDocumentedImplementedStatus[itemId] ?? response?.documentedImplementedStatus ?? null
     setSaving(true)
     try {
       const res = await fetch(`/api/audits/${auditId}/checklist/responses`, {
@@ -181,10 +204,16 @@ export const AuditExecution = ({
           checklistItemId: itemId,
           isCompliant: true,
           notes: notesToSave,
+          documentedImplementedStatus: statusToSave,
         }),
       })
       if (res.ok) {
         setDraftNotes((prev) => {
+          const next = { ...prev }
+          delete next[itemId]
+          return next
+        })
+        setDraftDocumentedImplementedStatus((prev) => {
           const next = { ...prev }
           delete next[itemId]
           return next
@@ -301,6 +330,38 @@ export const AuditExecution = ({
     }
   }
 
+  const handleDocumentedImplementedStatusChange = async (
+    itemId: string,
+    value: string | null
+  ) => {
+    const response = responseMap.get(itemId)
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/audits/${auditId}/checklist/responses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          checklistItemId: itemId,
+          isCompliant: response?.isCompliant ?? false,
+          notes: response?.notes ?? null,
+          documentedImplementedStatus: value,
+        }),
+      })
+      if (res.ok) {
+        setDraftDocumentedImplementedStatus((prev) => {
+          const next = { ...prev }
+          delete next[itemId]
+          return next
+        })
+        onResponseUpdate()
+      }
+    } catch (error) {
+      console.error('Failed to update documented/implemented status:', error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleDeleteCompliantEntry = async (itemId: string, responseId: string) => {
     if (!confirm('Delete this compliant entry? Notes and evidence will be removed. This cannot be undone.')) {
       return
@@ -318,6 +379,11 @@ export const AuditExecution = ({
         })
         setCollapsedItemIds((prev) => prev.filter((id) => id !== itemId))
         setDraftNotes((prev) => {
+          const next = { ...prev }
+          delete next[itemId]
+          return next
+        })
+        setDraftDocumentedImplementedStatus((prev) => {
           const next = { ...prev }
           delete next[itemId]
           return next
@@ -454,7 +520,23 @@ export const AuditExecution = ({
                   <>
                     {collapsedItemIds.includes(item.id) && response?.isCompliant === true ? (
                       <div className="flex items-center justify-between rounded-md border border-green-200 bg-green-50/50 px-3 py-2">
-                        <span className="text-sm text-green-800">Entry saved</span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-sm text-green-800">Entry saved</span>
+                          {(() => {
+                            const status =
+                              response?.documentedImplementedStatus ??
+                              draftDocumentedImplementedStatus[item.id]
+                            const option = status
+                              ? DOCUMENTED_IMPLEMENTED_STATUS_OPTIONS.find((o) => o.value === status)
+                              : null
+                            if (option) {
+                              return (
+                                <span className="text-xs text-green-700">{option.label}</span>
+                              )
+                            }
+                            return null
+                          })()}
+                        </div>
                         <div className="flex items-center gap-1">
                           <Button
                             type="button"
@@ -481,6 +563,44 @@ export const AuditExecution = ({
                       </div>
                     ) : (
                       <>
+                        <div className="space-y-2">
+                          <Label htmlFor={`doc-impl-${item.id}`}>
+                            Documented / Implemented status
+                          </Label>
+                          <Select
+                            value={
+                              draftDocumentedImplementedStatus[item.id] ??
+                              response?.documentedImplementedStatus ??
+                              ''
+                            }
+                            onValueChange={(value) =>
+                              setDraftDocumentedImplementedStatus((prev) => ({
+                                ...prev,
+                                [item.id]: value || null,
+                              }))
+                            }
+                            disabled={saving}
+                          >
+                            <SelectTrigger
+                              id={`doc-impl-${item.id}`}
+                              aria-label="Documented / Implemented status"
+                              className={cn(saving && 'cursor-not-allowed opacity-70')}
+                            >
+                              <SelectValue placeholder="Select status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DOCUMENTED_IMPLEMENTED_STATUS_OPTIONS.map((opt) => (
+                                <SelectItem
+                                  key={opt.value}
+                                  value={opt.value}
+                                  aria-label={opt.label}
+                                >
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <div className="space-y-2">
                           <Label htmlFor={`notes-${item.id}`}>Objective Evidence &amp; Notes *</Label>
                           <Textarea
@@ -590,6 +710,48 @@ export const AuditExecution = ({
                     </div>
                   ) : (
                     <>
+                      <div className="mb-3 space-y-2">
+                        <Label htmlFor={`doc-impl-nc-${item.id}`}>
+                          Documented / Implemented status
+                        </Label>
+                        <Select
+                          value={
+                            draftDocumentedImplementedStatus[item.id] ??
+                            response?.documentedImplementedStatus ??
+                            ''
+                          }
+                          onValueChange={(value) => {
+                            setDraftDocumentedImplementedStatus((prev) => ({
+                              ...prev,
+                              [item.id]: value || null,
+                            }))
+                            handleDocumentedImplementedStatusChange(
+                              item.id,
+                              value || null
+                            )
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger
+                            id={`doc-impl-nc-${item.id}`}
+                            aria-label="Documented / Implemented status"
+                            className={cn(saving && 'cursor-not-allowed opacity-70')}
+                          >
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {DOCUMENTED_IMPLEMENTED_STATUS_OPTIONS.map((opt) => (
+                              <SelectItem
+                                key={opt.value}
+                                value={opt.value}
+                                aria-label={opt.label}
+                              >
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <Button
                           type="button"
@@ -767,12 +929,37 @@ const NonCompliantForm = ({
   onEvidenceDelete,
 }: NonCompliantFormProps) => {
   const [saving, setSaving] = useState(false)
+  const [classifications, setClassifications] = useState<FindingClassification[]>([])
   const [formData, setFormData] = useState(() => ({
     departmentId: finding?.departmentId ?? '',
     description: finding?.description ?? checklistItem.auditQuestion ?? '',
     priority: (finding?.priority as 'P1' | 'P2' | 'P3') ?? 'P2',
     assignedToId: finding?.assignedToId ?? '',
+    classificationId: finding?.classificationId ?? '',
+    selectedGroup: '',
   }))
+
+  useEffect(() => {
+    const fetchClassifications = async () => {
+      try {
+        const res = await fetch('/api/finding-classifications', { credentials: 'same-origin' })
+        if (res.ok) {
+          const data = await res.json()
+          setClassifications(data ?? [])
+        }
+      } catch {
+        // ignore
+      }
+    }
+    fetchClassifications()
+  }, [])
+
+  useEffect(() => {
+    if (finding?.classificationId && classifications.length > 0) {
+      const group = classifications.find((c) => c.id === finding.classificationId)?.group ?? ''
+      setFormData((prev) => (prev.selectedGroup ? prev : { ...prev, selectedGroup: group }))
+    }
+  }, [finding?.classificationId, classifications])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -807,10 +994,12 @@ const NonCompliantForm = ({
                 description: formData.description,
                 priority: formData.priority,
                 assignedToId: formData.assignedToId,
+                classificationId: formData.classificationId || null,
               }
             : {
                 checklistItemId: checklistItem.id,
                 ...formData,
+                classificationId: formData.classificationId || null,
                 rootCause: null,
                 actionPlan: null,
               }
@@ -824,6 +1013,8 @@ const NonCompliantForm = ({
             description: checklistItem.auditQuestion || '',
             priority: 'P2',
             assignedToId: '',
+            classificationId: '',
+            selectedGroup: '',
           })
         }
         onFindingCreated()
@@ -848,6 +1039,53 @@ const NonCompliantForm = ({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {classifications.length > 0 && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="classification-group">Domain</Label>
+              <Select
+                value={formData.selectedGroup || (formData.classificationId ? classifications.find((c) => c.id === formData.classificationId)?.group ?? '' : '')}
+                onValueChange={(group) => setFormData({ ...formData, selectedGroup: group, classificationId: '' })}
+                disabled={saving}
+              >
+                <SelectTrigger id="classification-group" disabled={saving}>
+                  <SelectValue placeholder="Select domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set(classifications.map((c) => c.group))).map((grp) => (
+                    <SelectItem key={grp} value={grp}>
+                      {grp}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="classification">Classification</Label>
+              <Select
+                value={formData.classificationId}
+                onValueChange={(value) => setFormData({ ...formData, classificationId: value })}
+                disabled={saving}
+              >
+                <SelectTrigger id="classification" disabled={saving}>
+                  <SelectValue placeholder={formData.selectedGroup || formData.classificationId ? 'Select classification' : 'Select domain first'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(formData.selectedGroup
+                    ? classifications.filter((c) => c.group === formData.selectedGroup)
+                    : formData.classificationId
+                      ? classifications.filter((c) => c.group === classifications.find((x) => x.id === formData.classificationId)?.group)
+                      : []
+                  ).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
         <div className="space-y-2">
           <Label htmlFor="department">Department *</Label>
           <Select

@@ -70,7 +70,7 @@ const DocumentsPage = () => {
   }, [])
 
   const hasReviewerRole = userRoles.some((r) =>
-    ['SYSTEM_ADMIN', 'QUALITY_MANAGER', 'AUDITOR'].includes(r)
+    ['QUALITY_MANAGER', 'AUDITOR'].includes(r)
   )
 
   useEffect(() => {
@@ -373,6 +373,7 @@ const DocumentsPage = () => {
     const isManualHolderForDoc = isManualHolder(doc)
     const canOpenOrEdit =
       !isReviewOrDraft || isManualHolderForDoc || hasReviewerRole
+    const canEditApprovedPdf = status === 'APPROVED' ? hasReviewerRole : canOpenOrEdit
     const showOpenInWord = options.openInWord && canOpenOrEdit
     const showUploadNewVersion = options.uploadNewVersion && canOpenOrEdit
 
@@ -452,7 +453,7 @@ const DocumentsPage = () => {
               </Link>
             </Button>
           )}
-          {options.editPdf && canOpenOrEdit && (
+          {options.editPdf && canEditApprovedPdf && (
             <Button variant="outline" size="sm" asChild>
               <Link href={`/documents/${doc.id}?mode=edit`} aria-label="Edit document">
                 <Pencil className="mr-1 h-4 w-4" />

@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
   const isProtectedPath =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/audits') ||
+    pathname.startsWith('/audit-plan') ||
     pathname.startsWith('/findings') ||
     pathname.startsWith('/documents') ||
     pathname.startsWith('/notifications') ||
@@ -31,5 +32,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/audits/:path*', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password'],
+  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password'],
 }

@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { generateFindingNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
 import { calculateDeadlines } from '@/lib/audit-deadlines'
-import { getCurrentUserProfile, isNormalUser } from '@/lib/permissions'
+import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard } from '@/lib/permissions'
 
 export async function GET(request: Request) {
   try {
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       )
       .order('createdAt', { ascending: false })
 
-    if (isNormalUser(roles)) {
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles)) {
       query = query.eq('assignedToId', user.id)
     }
     if (status) {
@@ -76,7 +76,6 @@ export async function GET(request: Request) {
       result = result.filter((f: Record<string, unknown>) => {
         if (f.status === 'CLOSED') return false
         const rootCause = f.rootCause as string | null | undefined
-        const rootCauseStatus = f.rootCauseStatus as string | null | undefined
         const capDueDate = f.capDueDate as string | null | undefined
         const dueDate = f.dueDate as string | null | undefined
         const correctiveAction = Array.isArray(f.CorrectiveAction)
@@ -87,7 +86,6 @@ export async function GET(request: Request) {
         const caDueDate = ca?.dueDate as string | null | undefined
 
         const rootCauseMissing = rootCause == null || String(rootCause).trim() === ''
-        const rootCauseNotApproved = rootCauseStatus !== 'APPROVED'
         const noCap = !ca
         const capNotApproved = ca ? capStatus !== 'APPROVED' : true
         const pastDue =
@@ -95,7 +93,7 @@ export async function GET(request: Request) {
           (capDueDate && capDueDate < now) ||
           (caDueDate && caDueDate < now)
 
-        return rootCauseMissing || rootCauseNotApproved || noCap || capNotApproved || pastDue
+        return rootCauseMissing || noCap || capNotApproved || pastDue
       })
     }
 
@@ -125,7 +123,7 @@ export async function POST(request: Request) {
     const roles = await getCurrentUserRoles(supabase, user.id)
     if (!canCreateFinding(roles)) {
       return NextResponse.json(
-        { error: 'Only auditors, quality managers, and system admins can create findings' },
+        { error: 'Only auditors or quality managers can create findings' },
         { status: 403 }
       )
     }

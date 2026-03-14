@@ -12,13 +12,12 @@ import {
   canReviewFinding,
   canCreateFinding,
   canEditDocument,
+  isQualityManager,
+  canEditAudit,
 } from './permissions'
 
 describe('permissions', () => {
   describe('hasReviewerRole', () => {
-    it('returns true for SYSTEM_ADMIN', () => {
-      expect(hasReviewerRole(['SYSTEM_ADMIN'])).toBe(true)
-    })
     it('returns true for QUALITY_MANAGER', () => {
       expect(hasReviewerRole(['QUALITY_MANAGER'])).toBe(true)
     })
@@ -37,9 +36,6 @@ describe('permissions', () => {
   })
 
   describe('isAdminOrQM', () => {
-    it('returns true for SYSTEM_ADMIN', () => {
-      expect(isAdminOrQM(['SYSTEM_ADMIN'])).toBe(true)
-    })
     it('returns true for QUALITY_MANAGER', () => {
       expect(isAdminOrQM(['QUALITY_MANAGER'])).toBe(true)
     })
@@ -64,11 +60,8 @@ describe('permissions', () => {
   })
 
   describe('canSeeAmDashboard', () => {
-    it('returns true for SYSTEM_ADMIN', () => {
-      expect(canSeeAmDashboard(['SYSTEM_ADMIN'])).toBe(true)
-    })
-    it('returns true for QUALITY_MANAGER', () => {
-      expect(canSeeAmDashboard(['QUALITY_MANAGER'])).toBe(true)
+    it('returns false for QUALITY_MANAGER (AM only)', () => {
+      expect(canSeeAmDashboard(['QUALITY_MANAGER'])).toBe(false)
     })
     it('returns true for ACCOUNTABLE_MANAGER', () => {
       expect(canSeeAmDashboard(['ACCOUNTABLE_MANAGER'])).toBe(true)
@@ -82,14 +75,14 @@ describe('permissions', () => {
   })
 
   describe('canViewActivityLog', () => {
-    it('returns true for QUALITY_MANAGER', () => {
+    it('returns true for QUALITY_MANAGER only', () => {
       expect(canViewActivityLog(['QUALITY_MANAGER'])).toBe(true)
     })
-    it('returns true for ACCOUNTABLE_MANAGER', () => {
-      expect(canViewActivityLog(['ACCOUNTABLE_MANAGER'])).toBe(true)
+    it('returns false for ACCOUNTABLE_MANAGER', () => {
+      expect(canViewActivityLog(['ACCOUNTABLE_MANAGER'])).toBe(false)
     })
-    it('returns true for AUDITOR', () => {
-      expect(canViewActivityLog(['AUDITOR'])).toBe(true)
+    it('returns false for AUDITOR', () => {
+      expect(canViewActivityLog(['AUDITOR'])).toBe(false)
     })
     it('returns false for STAFF', () => {
       expect(canViewActivityLog(['STAFF'])).toBe(false)
@@ -103,8 +96,8 @@ describe('permissions', () => {
     it('returns false for QUALITY_MANAGER', () => {
       expect(isAuditorOnly(['QUALITY_MANAGER'])).toBe(false)
     })
-    it('returns false for SYSTEM_ADMIN', () => {
-      expect(isAuditorOnly(['SYSTEM_ADMIN'])).toBe(false)
+    it('returns false for QUALITY_MANAGER', () => {
+      expect(isAuditorOnly(['QUALITY_MANAGER'])).toBe(false)
     })
   })
 

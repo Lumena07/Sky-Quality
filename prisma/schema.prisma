@@ -219,10 +219,6 @@ model Finding {
   closeOutDueDate   DateTime?     // Corrective Action Close Out due date (based on priority)
   closedDate        DateTime?
   closedBy          String?
-  rootCauseStatus   String?       @default("PENDING")   // PENDING | APPROVED | REJECTED
-  rootCauseReviewedById String?
-  rootCauseReviewedAt   DateTime?
-  rootCauseRejectionReason String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   createdById       String
@@ -279,7 +275,8 @@ model CorrectiveAction {
 
   // CAT (Corrective Action Taken) specific
   correctiveActionTaken String?
-  catDueDate        DateTime?  // when CAT is due
+  catDueDate        DateTime?  // when CAT is due (synced from Finding.closeOutDueDate)
+  catEnteredAt      DateTime?  // when CAT was entered
   completionDate    DateTime?
   evidenceUrl       String?  // CAT evidence only
   catStatus         String?  @default("PENDING")
@@ -489,7 +486,7 @@ model ChecklistItem {
   id                String   @id @default(cuid())
   checklistId       String
   type              String   // 'title' or 'question'
-  ref               String?  // Reference number or Auric Air ID
+  ref               String?  // Reference number
   auditQuestion     String?  // Audit Question / Check Item
   complianceCriteria String? // Compliance Criteria
   docRef            String?  // Document Reference
@@ -511,15 +508,16 @@ model ChecklistItem {
 }
 
 model AuditChecklistItemResponse {
-  id                String   @id @default(cuid())
-  auditId           String
-  checklistItemId   String
-  isCompliant       Boolean? // null = not reviewed, true = compliant, false = non-compliant
-  notes             String?  // Objective evidence and notes
-  reviewedById      String   // Auditor who reviewed this item
-  reviewedAt        DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                          String   @id @default(cuid())
+  auditId                     String
+  checklistItemId             String
+  isCompliant                 Boolean? // null = not reviewed, true = compliant, false = non-compliant
+  notes                       String?  // Objective evidence and notes
+  documentedImplementedStatus String?  // DOCUMENTED_IMPLEMENTED | DOCUMENTED_NOT_IMPLEMENTED | NOT_DOCUMENTED_IMPLEMENTED | NOT_DOCUMENTED_NOT_IMPLEMENTED
+  reviewedById                String   // Auditor who reviewed this item
+  reviewedAt                  DateTime @default(now())
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
   audit             Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
   checklistItem     ChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)

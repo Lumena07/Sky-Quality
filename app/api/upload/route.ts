@@ -5,6 +5,14 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 // 2GB
+const ALLOWED_ENTITY_TYPES = [
+  'audit',
+  'finding',
+  'document',
+  'cap',
+  'quality-policy',
+  'quality-policy-objectives',
+]
 const ALLOWED_FILE_TYPES = [
   'image/jpeg',
   'image/jpg',
@@ -33,11 +41,18 @@ export async function POST(request: Request) {
 
     const formData = await request.formData()
     const file = formData.get('file') as File
-    const entityType = formData.get('entityType') as string // 'audit', 'finding', 'document', 'cap'
+    const entityType = formData.get('entityType') as string
     const entityId = formData.get('entityId') as string
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+    }
+
+    if (!entityType || !ALLOWED_ENTITY_TYPES.includes(entityType)) {
+      return NextResponse.json(
+        { error: 'Invalid or missing entityType' },
+        { status: 400 }
+      )
     }
 
     // Validate file size

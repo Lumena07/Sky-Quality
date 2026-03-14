@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const { roles } = await getCurrentUserProfile(supabase, user.id)
     if (!canViewActivityLog(roles)) {
       return NextResponse.json(
-        { error: 'Only reviewers, Quality Manager, Accountable Manager, or System Admin can view activity log' },
+        { error: 'Only reviewers, Quality Manager, or Accountable Manager can view activity log' },
         { status: 403 }
       )
     }

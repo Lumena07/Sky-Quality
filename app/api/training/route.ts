@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, isNormalUser } from '@/lib/permissions'
+import { getCurrentUserProfile, isNormalUser, canSeeTraining, canAddTraining, canSeeAmDashboard } from '@/lib/permissions'
 
 /** GET: List training records. Normal users see only their own; reviewers/AM see all (optional filter by userId). */
 export async function GET(request: Request) {
@@ -16,7 +16,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
+    if (!canSeeTraining(roles, departmentId)) {
+      return NextResponse.json(
+        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { status: 403 }
+      )
+    }
+
     const { searchParams } = new URL(request.url)
     const userIdParam = searchParams.get('userId')
 
@@ -30,7 +37,7 @@ export async function GET(request: Request) {
       )
       .order('expiryDate', { ascending: true, nullsFirst: false })
 
-    if (isNormalUser(roles)) {
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles)) {
       query = query.eq('userId', user.id)
     } else if (userIdParam) {
       query = query.eq('userId', userIdParam)
@@ -69,11 +76,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { getCurrentUserRoles, hasReviewerRole, canSeeAmDashboard } = await import('@/lib/permissions')
-    const roles = await getCurrentUserRoles(supabase, user.id)
-    if (!hasReviewerRole(roles) && !canSeeAmDashboard(roles)) {
+    const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
+    if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Only reviewers, Quality Manager, Accountable Manager, or System Admin can create training records' },
+        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { status: 403 }
+      )
+    }
+    if (!canAddTraining(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can add training or qualification records.' },
         { status: 403 }
       )
     }
@@ -82,8 +94,6 @@ export async function POST(request: Request) {
     const {
       userId,
       name,
-      code,
-      description,
       recordType,
       type,
       completedAt,
@@ -104,8 +114,6 @@ export async function POST(request: Request) {
       id: randomUUID(),
       userId: userId.trim(),
       name: name.trim(),
-      code: code?.trim() || null,
-      description: description?.trim() || null,
       recordType: resolvedType === 'QUALIFICATION' ? 'QUALIFICATION' : 'TRAINING',
       completedAt: completedAt ? new Date(completedAt).toISOString() : null,
       expiryDate: expiryDate ? new Date(expiryDate).toISOString() : null,

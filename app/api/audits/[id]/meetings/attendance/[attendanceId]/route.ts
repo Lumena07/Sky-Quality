@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, isAuditorOnly } from '@/lib/permissions'
+import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
 
 export async function PATCH(
   request: Request,
@@ -18,20 +18,21 @@ export async function PATCH(
     }
 
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    const auditorIds = await (async () => {
-      const { data } = await supabase
-        .from('AuditAuditor')
-        .select('userId')
-        .eq('auditId', params.id)
-      return (data ?? []).map((r: { userId: string }) => r.userId)
-    })()
-    const canManage =
-      roles.some((r) => r === 'SYSTEM_ADMIN' || r === 'QUALITY_MANAGER') ||
-      auditorIds.includes(user.id)
-
-    if (!canManage) {
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
       return NextResponse.json(
-        { error: 'Only auditors or QM/Admin can update attendance' },
+        { error: 'Only Quality Manager or auditors assigned to this audit can update attendance' },
         { status: 403 }
       )
     }
@@ -86,20 +87,21 @@ export async function DELETE(
     }
 
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    const auditorIds = await (async () => {
-      const { data } = await supabase
-        .from('AuditAuditor')
-        .select('userId')
-        .eq('auditId', params.id)
-      return (data ?? []).map((r: { userId: string }) => r.userId)
-    })()
-    const canManage =
-      roles.some((r) => r === 'SYSTEM_ADMIN' || r === 'QUALITY_MANAGER') ||
-      auditorIds.includes(user.id)
-
-    if (!canManage) {
+    const { data: auditorRows } = await supabase
+      .from('AuditAuditor')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditorIds = (auditorRows ?? []).map((r: { userId: string }) => r.userId)
+    const { data: auditeeRows } = await supabase
+      .from('AuditAuditee')
+      .select('userId')
+      .eq('auditId', params.id)
+    const auditeeIds = (auditeeRows ?? [])
+      .map((r: { userId: string | null }) => r.userId)
+      .filter(Boolean) as string[]
+    if (!canEditAudit(roles, user.id, auditorIds, auditeeIds)) {
       return NextResponse.json(
-        { error: 'Only auditors or QM/Admin can remove attendance' },
+        { error: 'Only Quality Manager or auditors assigned to this audit can remove attendance' },
         { status: 403 }
       )
     }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserProfile, canSeeAmDashboard } from '@/lib/permissions'
 
-/** GET: Accountable Manager dashboard data. Restricted to AM, Quality Manager, System Admin. */
+/** GET: Accountable Manager dashboard data. Restricted to AM only. */
 export async function GET() {
   try {
     const supabase = createSupabaseServerClient()
@@ -18,12 +18,10 @@ export async function GET() {
     const { roles } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeAmDashboard(roles)) {
       return NextResponse.json(
-        { error: 'Only Accountable Manager, Quality Manager, or System Admin can view AM dashboard' },
+        { error: 'Only Accountable Manager can view AM dashboard' },
         { status: 403 }
       )
     }
-
-    const now = new Date().toISOString()
 
     let escalations: Array<{
       id: string
@@ -51,59 +49,42 @@ export async function GET() {
       // Table may not exist yet
     }
 
-    const [
-      overdueCAPsResult,
-      openFindingsResult,
-      openByDeptResult,
-    ] = await Promise.all([
-      supabase
-        .from('CorrectiveAction')
+    let pendingRescheduleRequests: Array<{
+      id: string
+      auditId: string
+      requestedStartDate: string
+      requestedEndDate: string
+      requestedAt: string
+      reason: string | null
+      Audit?: { id: string; title?: string } | null
+      RequestedBy?: { id: string; firstName?: string; lastName?: string } | null
+    }> = []
+    try {
+      const { data: rescheduleData } = await supabase
+        .from('AuditRescheduleRequest')
         .select(
           `
           id,
-          findingId,
-          dueDate,
-          Finding:findingId(findingNumber, status, departmentId, Department:departmentId(name))
+          auditId,
+          requestedStartDate,
+          requestedEndDate,
+          requestedAt,
+          reason,
+          Audit:auditId(id, title),
+          RequestedBy:requestedById(id, firstName, lastName)
         `
         )
-        .in('status', ['OPEN', 'IN_PROGRESS'])
-        .lt('dueDate', now)
-        .limit(100),
-      supabase
-        .from('Finding')
-        .select('*', { count: 'exact', head: true })
-        .in('status', ['OPEN', 'IN_PROGRESS']),
-      supabase
-        .from('Finding')
-        .select('departmentId, Department:departmentId(name)')
-        .in('status', ['OPEN', 'IN_PROGRESS']),
-    ])
-
-    const overdueCAPs = overdueCAPsResult.data ?? []
-    const openFindingsCount = openFindingsResult.count ?? 0
-    const openByDeptRaw = openByDeptResult.data ?? []
-
-    const departmentCounts: Record<string, { name: string; count: number }> = {}
-    for (const row of openByDeptRaw) {
-      const deptId = (row as { departmentId: string }).departmentId
-      const dept = (row as { Department?: { name: string } | Array<{ name: string }> }).Department
-      const name = Array.isArray(dept) ? dept[0]?.name : dept?.name
-      if (!departmentCounts[deptId]) {
-        departmentCounts[deptId] = { name: name ?? deptId, count: 0 }
-      }
-      departmentCounts[deptId].count += 1
+        .eq('status', 'PENDING')
+        .order('requestedAt', { ascending: false })
+        .limit(50)
+      pendingRescheduleRequests = (rescheduleData ?? []) as typeof pendingRescheduleRequests
+    } catch {
+      // Table may not exist yet
     }
 
     return NextResponse.json({
       escalations,
-      overdueCAPs: overdueCAPs.slice(0, 30),
-      overdueCAPsCount: overdueCAPs.length,
-      openFindingsCount,
-      openByDepartment: Object.entries(departmentCounts).map(([id, v]) => ({
-        departmentId: id,
-        departmentName: v.name,
-        count: v.count,
-      })),
+      pendingRescheduleRequests,
     })
   } catch (error) {
     console.error('Error fetching AM dashboard:', error)

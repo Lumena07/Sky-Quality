@@ -10,8 +10,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Users, Building2, Settings, Building, Pencil, Search } from 'lucide-react'
+import { Users, Building2, Settings, Building, Pencil, Search, BarChart3, Tags, AlertTriangle } from 'lucide-react'
 import { isAdminOrQM } from '@/lib/permissions'
+import { KpiManagementContent } from '@/components/admin/kpi-management-content'
+import { FindingClassificationsContent } from '@/components/admin/finding-classifications-content'
+import { RegulatoryViolationsContent } from '@/components/admin/regulatory-violations-content'
 import {
   Dialog,
   DialogContent,
@@ -28,7 +31,6 @@ import {
 } from '@/components/ui/select'
 
 const USER_ROLES = [
-  'SYSTEM_ADMIN',
   'QUALITY_MANAGER',
   'ACCOUNTABLE_MANAGER',
   'AUDITOR',
@@ -75,6 +77,7 @@ type Organization = {
 const AdminPage = () => {
   const router = useRouter()
   const [adminAllowed, setAdminAllowed] = useState<boolean | null>(null)
+  const [roles, setRoles] = useState<string[]>([])
   const [users, setUsers] = useState<UserWithDept[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
 
@@ -87,11 +90,12 @@ const AdminPage = () => {
           return
         }
         const data = await res.json()
-        const roles = Array.isArray(data.roles) ? data.roles : []
-        if (!isAdminOrQM(roles)) {
+        const userRoles = Array.isArray(data.roles) ? data.roles : []
+        if (!isAdminOrQM(userRoles)) {
           router.replace('/dashboard')
           return
         }
+        setRoles(userRoles)
         setAdminAllowed(true)
       } catch {
         setAdminAllowed(false)
@@ -567,6 +571,22 @@ const AdminPage = () => {
               <Building className="mr-2 h-4 w-4" />
               Organizations
             </TabsTrigger>
+            {roles.includes('QUALITY_MANAGER') && (
+              <>
+                <TabsTrigger value="kpis">
+                  <BarChart3 className="mr-2 h-4 w-4" />
+                  KPI Management
+                </TabsTrigger>
+                <TabsTrigger value="finding-classifications">
+                  <Tags className="mr-2 h-4 w-4" />
+                  Finding Classifications
+                </TabsTrigger>
+                <TabsTrigger value="regulatory-violations">
+                  <AlertTriangle className="mr-2 h-4 w-4" />
+                  Regulatory Violations
+                </TabsTrigger>
+              </>
+            )}
             <TabsTrigger value="settings">
               <Settings className="mr-2 h-4 w-4" />
               Settings
@@ -1488,6 +1508,20 @@ const AdminPage = () => {
               </DialogContent>
             </Dialog>
           </TabsContent>
+
+          {roles.includes('QUALITY_MANAGER') && (
+            <>
+              <TabsContent value="kpis" className="space-y-4">
+                <KpiManagementContent />
+              </TabsContent>
+              <TabsContent value="finding-classifications" className="space-y-4">
+                <FindingClassificationsContent />
+              </TabsContent>
+              <TabsContent value="regulatory-violations" className="space-y-4">
+                <RegulatoryViolationsContent />
+              </TabsContent>
+            </>
+          )}
 
           <TabsContent value="settings" className="space-y-4">
             <Card>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
+import { getCurrentUserProfile, canCreateOrEditChecklist } from '@/lib/permissions'
 
 const incrementVersion = (currentVersion: string): string => {
   const parts = currentVersion.split('.')
@@ -93,6 +94,14 @@ export async function PATCH(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    if (!canCreateOrEditChecklist(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can create or edit checklists.' },
+        { status: 403 }
+      )
     }
 
     const body = await request.json()
@@ -298,6 +307,14 @@ export async function DELETE(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    if (!canCreateOrEditChecklist(roles)) {
+      return NextResponse.json(
+        { error: 'Only Quality Manager or auditors can create or edit checklists.' },
+        { status: 403 }
+      )
     }
 
     const { data: checklist, error } = await supabase
