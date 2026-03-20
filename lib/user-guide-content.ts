@@ -34,7 +34,7 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
     purpose:
       'This guide helps you navigate Sky SQ QMS in your role as Quality Manager. Use it to find where to perform common tasks and to understand the main areas available to you.',
     scope:
-      'Your access covers the full system: overview and reporting, quality policy and objectives, audit planning and execution, findings and corrective actions, document control, training records, performance metrics, and system administration.',
+      'Your access covers the full system: overview and reporting, quality policy and objectives, quality programme and audit execution, findings and corrective actions, document control, training records, performance metrics, and system administration.',
     menuSections: [
       {
         sectionName: 'Overview',
@@ -62,8 +62,13 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
         sectionName: 'Audit management',
         items: [
           {
-            label: 'Audit Plan',
-            description: 'View and edit the annual audit plan.',
+            label: 'Quality Assurance',
+            description:
+              'Sidebar section: expand it to open Quality Programme, Audits, Findings & CAP, and Checklists.',
+          },
+          {
+            label: 'Quality Programme',
+            description: 'View and edit recurring audits in the quality programme.',
           },
           {
             label: 'Audits',
@@ -90,6 +95,11 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
           {
             label: 'Training',
             description: 'View and manage training and qualification records.',
+          },
+          {
+            label: 'Quality team register',
+            description:
+              'Single view of Quality department members and Accountable Managers with their qualifications and training.',
           },
         ],
       },
@@ -120,6 +130,10 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
       { task: 'View system-wide stats and recent activity', link: 'Dashboard' },
       { task: 'Schedule or manage an audit', link: 'Audits' },
       { task: 'Review or approve a finding or CAP', link: 'Findings & CAP' },
+      {
+        task: 'View Quality team competence (QM, AM, auditors roster)',
+        link: 'Quality team register',
+      },
       { task: 'Manage users and settings', link: 'Admin' },
       { task: 'Change your password', link: 'Change password (sidebar footer)' },
     ],
@@ -129,7 +143,7 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
     purpose:
       'This guide helps you navigate Sky SQ QMS in your role as Accountable Manager. Use it to find where to perform common tasks and to understand the main areas available to you.',
     scope:
-      'Your access covers oversight and reporting: the AM dashboard, quality policy and objectives, audit plan and audits, findings and corrective actions, documents, training, and performance. You do not have access to system administration.',
+      'Your access covers oversight and reporting: the AM dashboard, quality policy and objectives, quality programme and audits, findings and corrective actions, documents, training, and performance. You do not have access to system administration.',
     menuSections: [
       {
         sectionName: 'Overview',
@@ -157,8 +171,13 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
         sectionName: 'Audit management',
         items: [
           {
-            label: 'Audit Plan',
-            description: 'View the audit plan.',
+            label: 'Quality Assurance',
+            description:
+              'Sidebar section: expand it to open Quality Programme, Audits, Findings & CAP, and Checklists.',
+          },
+          {
+            label: 'Quality Programme',
+            description: 'View the quality programme (recurring audits).',
           },
           {
             label: 'Audits',
@@ -186,6 +205,11 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
             label: 'Training',
             description: 'View training and qualification records.',
           },
+          {
+            label: 'Quality team register',
+            description:
+              'See Quality department staff and Accountable Managers with qualifications and training in one place.',
+          },
         ],
       },
       {
@@ -201,8 +225,12 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
     whereToGo: [
       { task: 'View oversight metrics and escalations', link: 'AM Dashboard' },
       { task: 'Approve an audit reschedule request', link: 'Audits' },
-      { task: 'View the audit plan', link: 'Audit Plan' },
+      { task: 'View the quality programme', link: 'Quality Programme' },
       { task: 'View training records', link: 'Training' },
+      {
+        task: 'View Quality team competence register',
+        link: 'Quality team register',
+      },
       { task: 'Change your password', link: 'Change password (sidebar footer)' },
     ],
   },
@@ -211,7 +239,7 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
     purpose:
       'This guide helps you navigate Sky SQ QMS in your role as Auditor. Use it to find where to perform common tasks and to understand the main areas available to you.',
     scope:
-      'Your access covers audits you are assigned to, the audit plan, checklists, findings and corrective actions, documents, training, and performance reporting. You do not have access to system administration.',
+      'Your access covers audits you are assigned to, the quality programme, checklists, findings and corrective actions, documents, training, and performance reporting. You do not have access to system administration.',
     menuSections: [
       {
         sectionName: 'Overview',
@@ -239,8 +267,13 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
         sectionName: 'Audit management',
         items: [
           {
-            label: 'Audit Plan',
-            description: 'View the audit plan.',
+            label: 'Quality Assurance',
+            description:
+              'Sidebar section: expand it to open Quality Programme, Audits, Findings & CAP, and Checklists.',
+          },
+          {
+            label: 'Quality Programme',
+            description: 'View the quality programme (recurring audits).',
           },
           {
             label: 'Audits',
@@ -268,6 +301,11 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
             label: 'Training',
             description: 'View and add training records.',
           },
+          {
+            label: 'Quality team register',
+            description:
+              'View Quality department members and Accountable Managers with qualifications and training (available even if you are not in the Quality department).',
+          },
         ],
       },
       {
@@ -285,6 +323,10 @@ export const USER_GUIDE_CONTENT: Record<UserGuideRoleId, UserGuideRoleContent> =
       { task: 'Work on an audit (checklist, findings)', link: 'Audits' },
       { task: 'Create or edit a checklist template', link: 'Checklists' },
       { task: 'Add or review a finding', link: 'Findings & CAP' },
+      {
+        task: 'View Quality team competence register',
+        link: 'Quality team register',
+      },
       { task: 'Change your password', link: 'Change password (sidebar footer)' },
     ],
   },

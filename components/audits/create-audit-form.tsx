@@ -51,7 +51,7 @@ interface CreateAuditFormProps {
   onSuccess: () => void
   /** When true (e.g. dialog opened), refetch users so focal persons are up to date. */
   open?: boolean
-  /** When creating from Audit Plan: plan id to link and optional pre-fill. */
+  /** When creating from Quality Programme: programme entry id to link and optional pre-fill. */
   auditPlanId?: string | null
   /** Suggested start date (ISO string or YYYY-MM-DD) to pre-fill start/end. */
   suggestedStartDate?: string | null
@@ -135,12 +135,12 @@ export const CreateAuditForm = ({
       } else {
         setAuditPlans([])
         if (res.status === 403) {
-          setAuditPlansLoadError('Audit plans could not be loaded. You can still schedule with a custom title below.')
+          setAuditPlansLoadError('Quality programme could not be loaded. You can still schedule with a custom title below.')
         }
       }
     } catch {
       setAuditPlans([])
-      setAuditPlansLoadError('Audit plans could not be loaded. You can still schedule with a custom title below.')
+      setAuditPlansLoadError('Quality programme could not be loaded. You can still schedule with a custom title below.')
     }
   }
 

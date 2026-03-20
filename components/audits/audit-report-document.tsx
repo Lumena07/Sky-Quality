@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import type {
   AuditReportData,
   ChecklistItemReport,
@@ -39,6 +40,16 @@ export const AuditReportDocument = ({ data }: AuditReportDocumentProps) => {
   return (
     <article className="audit-report" role="document" aria-label="Audit Report">
       <header className="report-header">
+        <div className="report-header-brand">
+          <Image
+            src="/logo.png"
+            alt="SKYAERO Aviation Limited eQMS"
+            width={976}
+            height={439}
+            className="report-logo"
+            unoptimized
+          />
+        </div>
         <h1 className="report-title">{reportTitle}</h1>
       </header>
 

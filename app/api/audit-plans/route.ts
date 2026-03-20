@@ -127,6 +127,14 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+    const deptTrimmed =
+      departmentId != null && String(departmentId).trim() ? String(departmentId).trim() : ''
+    if (!deptTrimmed) {
+      return NextResponse.json(
+        { error: 'Department is required for each programme entry.' },
+        { status: 400 }
+      )
+    }
     const interval = typeof intervalMonths === 'number' ? intervalMonths : parseInt(intervalMonths, 10)
     if (Number.isNaN(interval) || interval < 1) {
       return NextResponse.json(
@@ -156,7 +164,7 @@ export async function POST(request: Request) {
         name: name.trim(),
         intervalMonths: interval,
         lastDoneDate: lastDone,
-        departmentId: departmentId && String(departmentId).trim() ? String(departmentId).trim() : null,
+        departmentId: deptTrimmed,
         base: base && String(base).trim() ? String(base).trim() : null,
         scope: scope && String(scope).trim() ? String(scope).trim() : null,
         createdById: user.id,

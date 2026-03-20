@@ -93,6 +93,9 @@ model User {
   notifications         Notification[]
   activityLogs          ActivityLog[]
   checklistResponses    AuditChecklistItemResponse[]
+  preparationPriorFindingsReviews Audit[] @relation("PreparationPriorFindingsReviewer")
+  preparationStandardsReviews     Audit[] @relation("PreparationStandardsReviewer")
+  auditPreparationQuestionsCreated  AuditPreparationQuestion[]
 
   @@index([email])
   @@index([departmentId])
@@ -145,6 +148,13 @@ model Audit {
   checklistResponses AuditChecklistItemResponse[]
   notifications     Notification[]
   activityLogs      ActivityLog[]
+  preparationPriorFindingsReviewedAt   DateTime?
+  preparationPriorFindingsReviewedById   String?
+  preparationStandardsReviewedAt         DateTime?
+  preparationStandardsReviewedById       String?
+  preparationPriorFindingsReviewedBy     User?   @relation("PreparationPriorFindingsReviewer", fields: [preparationPriorFindingsReviewedById], references: [id])
+  preparationStandardsReviewedBy       User?   @relation("PreparationStandardsReviewer", fields: [preparationStandardsReviewedById], references: [id])
+  preparationQuestions                 AuditPreparationQuestion[]
 
   @@index([departmentId])
   @@index([scheduledDate])
@@ -153,6 +163,23 @@ model Audit {
   @@index([status])
   @@index([auditNumber])
   @@index([checklistId])
+  @@index([preparationPriorFindingsReviewedById])
+  @@index([preparationStandardsReviewedById])
+}
+
+model AuditPreparationQuestion {
+  id           String   @id @default(cuid())
+  auditId      String
+  sortOrder    Int      @default(0)
+  questionText String
+  createdAt    DateTime @default(now())
+  createdById  String
+
+  audit     Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  createdBy User  @relation(fields: [createdById], references: [id])
+
+  @@index([auditId])
+  @@index([auditId, sortOrder])
 }
 
 model AuditAuditor {

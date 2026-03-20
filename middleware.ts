@@ -16,6 +16,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/admin') ||
     pathname.startsWith('/activity-log') ||
     pathname.startsWith('/training') ||
+    pathname.startsWith('/quality-team') ||
     pathname.startsWith('/change-password') ||
     pathname.startsWith('/user-guide')
 
@@ -33,5 +34,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/change-password', '/user-guide'],
+  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/quality-team', '/change-password', '/user-guide'],
 }

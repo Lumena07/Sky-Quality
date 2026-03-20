@@ -12,6 +12,7 @@ import { FileText, AlertCircle, CheckCircle, Download, Plus, Trash2 } from 'luci
 import Link from 'next/link'
 import { FileUpload, FileList } from '@/components/ui/file-upload'
 import { AuditExecution } from '@/components/audits/audit-execution'
+import { AuditPreparation } from '@/components/audits/audit-preparation'
 import { MeetingAttendanceList } from '@/components/audits/meeting-attendance-list'
 import {
   Dialog,
@@ -406,6 +407,31 @@ const AuditDetailPage = () => {
       }))
   }
 
+  /** Matches server rules in POST /api/audits/[id]/send-to-auditee */
+  const canSendScheduleAndChecklistToAuditees = (a: any): boolean =>
+    Boolean(a?.checklistId) &&
+    (getAuditScheduleItems(a).length > 0 || !!a?.openingMeetingAt || !!a?.closingMeetingAt)
+
+  const handleSendScheduleAndChecklistToAuditees = async () => {
+    if (!params.id || typeof params.id !== 'string') return
+    setSendingToAuditee(true)
+    try {
+      const res = await fetch(`/api/audits/${params.id}/send-to-auditee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        alert((data as { message?: string }).message ?? 'Schedule and checklist sent to auditees.')
+        fetchAudit()
+      } else {
+        alert((data as { error?: string }).error ?? 'Failed to send')
+      }
+    } finally {
+      setSendingToAuditee(false)
+    }
+  }
+
   const handleTimetableSubmit = async () => {
     if (!audit) return
     setSavingTimetable(true)
@@ -478,6 +504,10 @@ const AuditDetailPage = () => {
   const canEditAuditValue =
     me &&
     canEditAudit(me.roles, me.id, auditorUserIds, auditeeUserIds)
+  const canMutateAuditPreparation =
+    !!canEditAuditValue &&
+    audit.status !== 'COMPLETED' &&
+    audit.status !== 'CLOSED'
 
   return (
     <MainLayout>
@@ -511,6 +541,9 @@ const AuditDetailPage = () => {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            {!isERP && (
+              <TabsTrigger value="preparation">Audit preparation</TabsTrigger>
+            )}
             {!isERP && (
               <TabsTrigger value="schedule">Audit Schedule</TabsTrigger>
             )}
@@ -613,7 +646,7 @@ const AuditDetailPage = () => {
                         )}
                         {!isERP && !audit?.checklistScheduleSentAt && !pendingReschedule && (
                           <p className="text-sm text-muted-foreground mt-2">
-                            Send the checklist and schedule to auditees first (Audit Schedule tab).
+                            Send the schedule and checklist to auditees first (Audit preparation or Audit Schedule tab).
                           </p>
                         )}
                       </>
@@ -698,6 +731,24 @@ const AuditDetailPage = () => {
           </TabsContent>
 
           {!isERP && (
+          <TabsContent value="preparation" className="space-y-4">
+            <AuditPreparation
+              auditId={params.id as string}
+              departmentId={audit.departmentId ?? audit.department?.id}
+              isActiveTab={activeTab === 'preparation'}
+              canMutate={canMutateAuditPreparation}
+              onGoToChecklist={() => setActiveTab('checklist')}
+              onGoToSchedule={() => setActiveTab('schedule')}
+              showSendToAuditees={audit.status === 'PLANNED' && !!canEditAuditValue}
+              canSendToAuditees={canSendScheduleAndChecklistToAuditees(audit)}
+              sendingToAuditees={sendingToAuditee}
+              checklistScheduleSentAt={audit.checklistScheduleSentAt ?? null}
+              onSendScheduleAndChecklistToAuditees={handleSendScheduleAndChecklistToAuditees}
+            />
+          </TabsContent>
+          )}
+
+          {!isERP && (
           <TabsContent value="schedule" className="space-y-4">
             <Card>
               <CardHeader>
@@ -771,49 +822,6 @@ const AuditDetailPage = () => {
                       {items.length === 0 && !audit.openingMeetingAt && !audit.closingMeetingAt && !audit.scheduleNotes && (
                         <p className="text-sm text-muted-foreground">
                           No timetable yet. Use Edit schedule to add items (e.g. Opening meeting Day 1, Closing meeting Last day) and times.
-                        </p>
-                      )}
-                    </>
-                  )
-                })()}
-                {audit.status === 'PLANNED' && canEditAuditValue && (() => {
-                  const hasChecklist = !!audit?.checklistId
-                  const hasSchedule =
-                    getAuditScheduleItems(audit).length > 0 ||
-                    !!audit?.openingMeetingAt ||
-                    !!audit?.closingMeetingAt
-                  const canSendToAuditee = hasChecklist && hasSchedule
-                  return (
-                    <>
-                      <Button
-                        className="w-full mt-4"
-                        variant="secondary"
-                        disabled={!canSendToAuditee || sendingToAuditee}
-                        onClick={async () => {
-                          setSendingToAuditee(true)
-                          try {
-                            const res = await fetch(`/api/audits/${params.id}/send-to-auditee`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                            })
-                            const data = await res.json().catch(() => ({}))
-                            if (res.ok) {
-                              alert(data.message ?? 'Checklist and schedule sent to auditees.')
-                              fetchAudit()
-                            } else {
-                              alert(data.error ?? 'Failed to send')
-                            }
-                          } finally {
-                            setSendingToAuditee(false)
-                          }
-                        }}
-                      >
-                        {sendingToAuditee ? 'Sending...' : 'Send checklist & schedule to auditee'}
-                      </Button>
-                      {!canSendToAuditee && !sendingToAuditee && (
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Select a checklist and add schedule details (e.g. via Edit schedule) before
-                          sending to auditees.
                         </p>
                       )}
                     </>

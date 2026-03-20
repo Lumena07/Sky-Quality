@@ -44,6 +44,19 @@
   border-bottom: 2px solid var(--report-border);
 }
 
+.report-header-brand {
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.report-logo {
+  max-height: 48px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
 .report-title {
   margin: 0;
   font-size: 1.75rem;
@@ -365,6 +378,10 @@
   .report-header {
     padding-bottom: 12pt;
     margin-bottom: 12pt;
+  }
+
+  .report-logo {
+    max-height: 36pt;
   }
 
   .report-title {

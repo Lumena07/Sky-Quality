@@ -150,7 +150,15 @@ export async function PATCH(
       }
     }
     if (departmentId !== undefined) {
-      update.departmentId = departmentId && String(departmentId).trim() ? String(departmentId).trim() : null
+      const trimmed =
+        departmentId != null && String(departmentId).trim() ? String(departmentId).trim() : ''
+      if (!trimmed) {
+        return NextResponse.json(
+          { error: 'Department cannot be cleared; assign a department to this programme entry.' },
+          { status: 400 }
+        )
+      }
+      update.departmentId = trimmed
     }
     if (base !== undefined) {
       update.base = base && String(base).trim() ? String(base).trim() : null

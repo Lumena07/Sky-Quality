@@ -44,6 +44,13 @@ export const canSeeTraining = (
 ): boolean =>
   departmentId === QUALITY_DEPARTMENT_ID || isAccountableManager(roles)
 
+/**
+ * Quality team register: QM, AM, or Auditor — consolidated roster of Quality dept + AMs (see API filter).
+ * Auditors outside Quality can open this even when they cannot open the full Training tab.
+ */
+export const canSeeQualityTeamRegister = (roles: string[]): boolean =>
+  hasReviewerRole(roles) || isAccountableManager(roles)
+
 /** Can add, update, or delete training/qualification records: Quality Manager or Auditor only. */
 export const canAddTraining = (roles: string[]): boolean =>
   hasReviewerRole(roles)
@@ -52,11 +59,11 @@ export const canAddTraining = (roles: string[]): boolean =>
 export const canScheduleAudit = (roles: string[]): boolean =>
   isQualityManager(roles) || isAuditorOnly(roles)
 
-/** Can view the Audit Plan tab and list: Quality Manager, Auditor, or Accountable Manager. */
+/** Can view the Quality Programme tab and list: Quality Manager, Auditor, or Accountable Manager. */
 export const canViewAuditPlan = (roles: string[]): boolean =>
   isQualityManager(roles) || isAuditorOnly(roles) || isAccountableManager(roles)
 
-/** Can add, edit, or delete audit plans: Quality Manager only. Auditors and AM have view-only. */
+/** Can add, edit, or delete quality programme entries: Quality Manager only. Auditors and AM have view-only. */
 export const canManageAuditPlan = (roles: string[]): boolean =>
   isQualityManager(roles)
 
@@ -161,21 +168,34 @@ export async function getCurrentUserRoles(
   return profile.roles
 }
 
-/** Fetch current user's roles and departmentId from User table (for API use). */
+/** Fetch current user's roles, departmentId, and organizationId from User table (for API use). */
 export async function getCurrentUserProfile(
   supabase: unknown,
   authUserId: string
-): Promise<{ roles: string[]; departmentId: string | null }> {
+): Promise<{
+  roles: string[]
+  departmentId: string | null
+  organizationId: string | null
+}> {
   const client = supabase as SupabaseClientLike
   const { data } = await client
     .from('User')
-    .select('roles, role, departmentId')
+    .select('roles, role, departmentId, organizationId')
     .eq('id', authUserId)
     .single()
   if (!data || typeof data !== 'object') {
-    return { roles: [], departmentId: null }
+    return { roles: [], departmentId: null, organizationId: null }
   }
-  const d = data as { roles?: string[]; role?: string; departmentId?: string | null }
+  const d = data as {
+    roles?: string[]
+    role?: string
+    departmentId?: string | null
+    organizationId?: string | null
+  }
   const roles = Array.isArray(d.roles) && d.roles.length > 0 ? d.roles : d.role ? [d.role] : []
-  return { roles, departmentId: d.departmentId ?? null }
+  return {
+    roles,
+    departmentId: d.departmentId ?? null,
+    organizationId: d.organizationId ?? null,
+  }
 }

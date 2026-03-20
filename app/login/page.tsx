@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,13 +60,20 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4 gap-6">
+      <Image
+        src="/logo.png"
+        alt="SKYAERO Aviation Limited eQMS"
+        width={976}
+        height={439}
+        className="w-full max-w-sm h-auto object-contain"
+        priority
+        unoptimized
+      />
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">Sky SQ QMS</CardTitle>
-          <CardDescription className="text-center">
-            Quality Management System
-          </CardDescription>
+          <CardTitle className="text-xl font-semibold text-center">Sign in</CardTitle>
+          <CardDescription className="text-center">Quality Management System</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -16,13 +16,19 @@ export async function GET() {
 
     const { data: profile, error: profileError } = await supabase
       .from('User')
-      .select('id, email, roles, role, departmentId')
+      .select('id, email, roles, role, departmentId, organizationId')
       .eq('id', user.id)
       .single()
 
     if (profileError || !profile) {
       return NextResponse.json(
-        { id: user.id, email: user.email ?? null, roles: [], departmentId: null },
+        {
+          id: user.id,
+          email: user.email ?? null,
+          roles: [],
+          departmentId: null,
+          organizationId: null,
+        },
         { status: 200 }
       )
     }
@@ -38,6 +44,7 @@ export async function GET() {
       email: profile.email ?? user.email ?? null,
       roles,
       departmentId: profile.departmentId ?? null,
+      organizationId: profile.organizationId ?? null,
     })
   } catch (error) {
     console.error('Error in /api/me:', error)
