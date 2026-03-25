@@ -14,6 +14,8 @@ import {
   canEditDocument,
   isQualityManager,
   canEditAudit,
+  canAccessQualityModule,
+  canAccessSmsModule,
 } from './permissions'
 
 describe('permissions', () => {
@@ -170,6 +172,30 @@ describe('permissions', () => {
     })
     it('returns false when review/draft and not holder and not reviewer', () => {
       expect(canEditDocument(true, false, ['STAFF'])).toBe(false)
+    })
+  })
+
+  describe('canAccessQualityModule', () => {
+    it('returns true for STAFF', () => {
+      expect(canAccessQualityModule(['STAFF'])).toBe(true)
+    })
+    it('returns true for FOCAL_PERSON', () => {
+      expect(canAccessQualityModule(['FOCAL_PERSON'])).toBe(true)
+    })
+    it('returns false for empty roles', () => {
+      expect(canAccessQualityModule([])).toBe(false)
+    })
+  })
+
+  describe('canAccessSmsModule', () => {
+    it('returns true for DIRECTOR_OF_SAFETY', () => {
+      expect(canAccessSmsModule(['DIRECTOR_OF_SAFETY'])).toBe(true)
+    })
+    it('returns true for STAFF', () => {
+      expect(canAccessSmsModule(['STAFF'])).toBe(true)
+    })
+    it('returns false for unknown role only', () => {
+      expect(canAccessSmsModule(['UNKNOWN_ROLE'])).toBe(false)
     })
   })
 })

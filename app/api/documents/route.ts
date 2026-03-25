@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
+    const smsOnly = searchParams.get('smsOnly') === 'true'
 
     if (isNormalUser(roles) && !canSeeAmDashboard(roles)) {
       const manualHolderQuery = supabase
@@ -68,6 +69,9 @@ export async function GET(request: Request) {
 
     if (status) {
       query = query.eq('status', status)
+    }
+    if (smsOnly) {
+      query = query.eq('smsDocument', true)
     }
 
     const { data: documents, error } = await query
@@ -123,6 +127,7 @@ export async function POST(request: Request) {
       issueNumber,
       revisionNumber,
       manualHolderIds,
+      smsDocument,
     } = body
 
     if (!title?.trim()) {
@@ -160,6 +165,7 @@ export async function POST(request: Request) {
       createdById: user.id,
       createdAt: now,
       updatedAt: now,
+      smsDocument: Boolean(smsDocument),
     }
     if (documentStatus === 'APPROVED') {
       const ids = Array.isArray(departmentIds)

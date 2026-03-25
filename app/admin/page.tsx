@@ -37,6 +37,16 @@ const USER_ROLES = [
   'DEPARTMENT_HEAD',
   'STAFF',
   'FOCAL_PERSON',
+  'DIRECTOR_OF_SAFETY',
+  'SAFETY_OFFICER',
+] as const
+
+const SAFETY_OPERATIONAL_AREAS = [
+  'airline_ops',
+  'mro_maintenance',
+  'airport_ground_ops',
+  'all',
+  'other',
 ] as const
 
 type UserRole = (typeof USER_ROLES)[number]
@@ -57,6 +67,7 @@ type UserWithDept = {
   role?: UserRole
   roles?: string[]
   organizationId?: string | null
+  safetyOperationalArea?: (typeof SAFETY_OPERATIONAL_AREAS)[number] | null
   position: string | null
   isActive?: boolean
   Department: { id: string; name: string } | null
@@ -112,6 +123,7 @@ const AdminPage = () => {
   const [editingUser, setEditingUser] = useState<UserWithDept | null>(null)
   const [userForm, setUserForm] = useState({
     roles: [] as string[],
+    safetyOperationalArea: '' as string,
     departmentId: '',
     isActive: true,
     position: '',
@@ -123,6 +135,7 @@ const AdminPage = () => {
     firstName: '',
     lastName: '',
     roles: ['STAFF'] as string[],
+    safetyOperationalArea: '' as string,
     departmentId: '',
     position: '',
     phone: '',
@@ -254,6 +267,7 @@ const AdminPage = () => {
       firstName: '',
       lastName: '',
       roles: ['STAFF'],
+      safetyOperationalArea: '',
       departmentId: '',
       position: '',
       phone: '',
@@ -272,6 +286,10 @@ const AdminPage = () => {
       addUserForm.roles.length === 0
     )
       return
+    if (addUserForm.roles.includes('SAFETY_OFFICER') && !addUserForm.safetyOperationalArea) {
+      alert('Safety operational area is required for Safety Officer role')
+      return
+    }
     setAddUserSubmitting(true)
     try {
       const res = await fetch('/api/users', {
@@ -283,6 +301,7 @@ const AdminPage = () => {
           firstName: addUserForm.firstName.trim(),
           lastName: addUserForm.lastName.trim(),
           roles: addUserForm.roles,
+          safetyOperationalArea: addUserForm.safetyOperationalArea || undefined,
           departmentId: addUserForm.departmentId || undefined,
           position: addUserForm.position.trim() || undefined,
           phone: addUserForm.phone.trim() || undefined,
@@ -307,6 +326,7 @@ const AdminPage = () => {
     setEditingUser(user)
     setUserForm({
       roles: getUserRoles(user),
+      safetyOperationalArea: user.safetyOperationalArea ?? '',
       departmentId: user.Department?.id ?? '',
       isActive: user.isActive !== false,
       position: user.position ?? '',
@@ -322,6 +342,10 @@ const AdminPage = () => {
       alert('Select at least one role')
       return
     }
+    if (userForm.roles.includes('SAFETY_OFFICER') && !userForm.safetyOperationalArea) {
+      alert('Safety operational area is required for Safety Officer role')
+      return
+    }
     setUserSubmitting(true)
     try {
       const res = await fetch(`/api/users/${editingUser.id}`, {
@@ -329,6 +353,7 @@ const AdminPage = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roles: userForm.roles,
+          safetyOperationalArea: userForm.safetyOperationalArea || null,
           departmentId: userForm.departmentId || null,
           isActive: userForm.isActive,
           position: userForm.position || undefined,
@@ -776,6 +801,32 @@ const AdminPage = () => {
                         ))}
                       </div>
                     </div>
+                    {userForm.roles.includes('SAFETY_OFFICER') && (
+                      <div className="space-y-2">
+                        <Label htmlFor="user-safety-area">Safety operational area *</Label>
+                        <Select
+                          value={userForm.safetyOperationalArea || '__none__'}
+                          onValueChange={(v) =>
+                            setUserForm((p) => ({
+                              ...p,
+                              safetyOperationalArea: v === '__none__' ? '' : v,
+                            }))
+                          }
+                        >
+                          <SelectTrigger id="user-safety-area" aria-label="Safety operational area">
+                            <SelectValue placeholder="Select safety area" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Select area</SelectItem>
+                            {SAFETY_OPERATIONAL_AREAS.map((area) => (
+                              <SelectItem key={area} value={area}>
+                                {area.replace(/_/g, ' ')}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label htmlFor="user-department">Department</Label>
                       <Select
@@ -944,6 +995,32 @@ const AdminPage = () => {
                       ))}
                     </div>
                   </div>
+                  {addUserForm.roles.includes('SAFETY_OFFICER') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="add-user-safety-area">Safety operational area *</Label>
+                      <Select
+                        value={addUserForm.safetyOperationalArea || '__none__'}
+                        onValueChange={(v) =>
+                          setAddUserForm((p) => ({
+                            ...p,
+                            safetyOperationalArea: v === '__none__' ? '' : v,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="add-user-safety-area" aria-label="Safety operational area">
+                          <SelectValue placeholder="Select safety area" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Select area</SelectItem>
+                          {SAFETY_OPERATIONAL_AREAS.map((area) => (
+                            <SelectItem key={area} value={area}>
+                              {area.replace(/_/g, ' ')}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="add-user-department">Department</Label>
                     <Select

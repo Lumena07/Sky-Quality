@@ -16,6 +16,7 @@ import {
   Calendar,
   CalendarCheck,
   AlertCircle,
+  Siren,
   FileText,
   Settings,
   LogOut,
@@ -77,6 +78,7 @@ type SidebarNavEntry =
 
 const allMenuItems: MenuLinkItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/sms/risk/report', label: 'Report Hazard / Occurrence', icon: Siren },
   { href: '/quality-policy', label: 'Quality Policy & Objectives', icon: Target },
   { href: '/quality-team', label: 'Quality team register', icon: Users },
   { href: '/audit-plan', label: 'Quality Programme', icon: CalendarCheck },

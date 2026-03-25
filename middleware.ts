@@ -6,7 +6,9 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
   const isProtectedPath =
+    pathname.startsWith('/modules') ||
     pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/sms') ||
     pathname.startsWith('/audits') ||
     pathname.startsWith('/audit-plan') ||
     pathname.startsWith('/findings') ||
@@ -34,5 +36,22 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/audits/:path*', '/audit-plan', '/findings/:path*', '/documents/:path*', '/notifications/:path*', '/checklists/:path*', '/admin/:path*', '/activity-log', '/training', '/quality-team', '/change-password', '/user-guide'],
+  matcher: [
+    '/modules',
+    '/dashboard/:path*',
+    '/sms',
+    '/sms/:path*',
+    '/audits/:path*',
+    '/audit-plan',
+    '/findings/:path*',
+    '/documents/:path*',
+    '/notifications/:path*',
+    '/checklists/:path*',
+    '/admin/:path*',
+    '/activity-log',
+    '/training',
+    '/quality-team',
+    '/change-password',
+    '/user-guide',
+  ],
 }

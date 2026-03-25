@@ -21,6 +21,7 @@ export async function GET() {
       openFindingsResult,
       overdueCAPsResult,
       pendingDocumentsResult,
+      pendingAssessmentHazardsResult,
     ] = await Promise.all([
       supabase.from('Audit').select('*', { count: 'exact', head: true }),
       supabase
@@ -40,6 +41,10 @@ export async function GET() {
         .from('Document')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'REVIEW'),
+      supabase
+        .from('sms_hazards')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'PENDING_ASSESSMENT'),
     ])
 
     const totalAudits = totalAuditsResult.count ?? 0
@@ -47,6 +52,7 @@ export async function GET() {
     const openFindings = openFindingsResult.count ?? 0
     const overdueCAPs = overdueCAPsResult.count ?? 0
     const pendingDocuments = pendingDocumentsResult.count ?? 0
+    const pendingAssessmentHazards = pendingAssessmentHazardsResult.count ?? 0
 
     return NextResponse.json({
       totalAudits,
@@ -54,6 +60,7 @@ export async function GET() {
       openFindings,
       overdueCAPs,
       pendingDocuments,
+      pendingAssessmentHazards,
     })
   } catch (error) {
     console.error('Error fetching dashboard stats:', error)

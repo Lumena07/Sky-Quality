@@ -6,6 +6,8 @@ export const ADMIN_OR_QM = new Set(['QUALITY_MANAGER'])
 
 /** Accountable Manager: sees AM dashboard and escalations; oversight role per ICAO / internal manual. */
 export const ACCOUNTABLE_MANAGER_ROLE = 'ACCOUNTABLE_MANAGER'
+export const DIRECTOR_OF_SAFETY_ROLE = 'DIRECTOR_OF_SAFETY'
+export const SAFETY_OFFICER_ROLE = 'SAFETY_OFFICER'
 
 /** Roles that see full dashboard, AM dashboard, and oversight data (QM + AM). */
 export const ADMIN_OR_QM_OR_AM = new Set([
@@ -34,8 +36,79 @@ export const canApproveAuditReschedule = (roles: string[]): boolean =>
 export const canSeeAmDashboard = (roles: string[]): boolean =>
   isAccountableManager(roles)
 
+export const isDirectorOfSafety = (roles: string[]): boolean =>
+  roles.some((r) => r === DIRECTOR_OF_SAFETY_ROLE)
+
+/**
+ * Normalizes role strings from User.roles / User.role so permission checks match
+ * (handles "Director of Safety", lowercase, hyphenated variants, etc.).
+ */
+export const normalizeAppUserRoles = (roles: string[]): string[] => {
+  const alias: Record<string, string> = {
+    director_of_safety: DIRECTOR_OF_SAFETY_ROLE,
+    safety_officer: SAFETY_OFFICER_ROLE,
+    quality_manager: 'QUALITY_MANAGER',
+    accountable_manager: ACCOUNTABLE_MANAGER_ROLE,
+    system_admin: 'SYSTEM_ADMIN',
+    department_head: 'DEPARTMENT_HEAD',
+    focal_person: 'FOCAL_PERSON',
+    auditor: 'AUDITOR',
+    staff: 'STAFF',
+  }
+  return roles.map((r) => {
+    if (typeof r !== 'string') return String(r)
+    const trimmed = r.trim()
+    if (!trimmed) return trimmed
+    const key = trimmed.toLowerCase().replace(/[-\s]+/g, '_')
+    return alias[key] ?? trimmed
+  })
+}
+
+export const isSafetyOfficer = (roles: string[]): boolean =>
+  roles.some((r) => r === SAFETY_OFFICER_ROLE)
+
+export const canAccessSmsModule = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles) ||
+  isSafetyOfficer(roles) ||
+  isAccountableManager(roles) ||
+  roles.some((r) => ['DEPARTMENT_HEAD', 'STAFF', 'QUALITY_MANAGER', 'AUDITOR'].includes(r))
+
+/** Roles that may open the Quality (eQMS) module from the module chooser. */
+const QUALITY_MODULE_ENTRY_ROLES = new Set<string>([
+  'QUALITY_MANAGER',
+  'AUDITOR',
+  ACCOUNTABLE_MANAGER_ROLE,
+  DIRECTOR_OF_SAFETY_ROLE,
+  SAFETY_OFFICER_ROLE,
+  'DEPARTMENT_HEAD',
+  'STAFF',
+  'FOCAL_PERSON',
+])
+
+/** Whether the user may enter the Quality module (dashboard and related routes). */
+export const canAccessQualityModule = (roles: string[]): boolean =>
+  roles.some((r) => QUALITY_MODULE_ENTRY_ROLES.has(r))
+
+export const canManageSmsRoles = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles) || isAdminOrQM(roles)
+
+export const canManageSmsPolicy = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles) ||
+  isSafetyOfficer(roles) ||
+  roles.some((r) => r === 'SYSTEM_ADMIN')
+
+export const canApproveSmsPolicy = (roles: string[]): boolean =>
+  isAccountableManager(roles)
+
+export const canViewSmsProtectedData = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles) || isSafetyOfficer(roles)
+
+export const canManageSmsPersonnel = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles)
+
 /** Quality department ID; users in this dept or AM can see the Training tab. */
 export const QUALITY_DEPARTMENT_ID = 'dept_quality_001'
+export const SAFETY_DEPARTMENT_ID = 'dept_safety_001'
 
 /** Can see Training tab and access training APIs: Quality department or Accountable Manager. */
 export const canSeeTraining = (
@@ -50,6 +123,10 @@ export const canSeeTraining = (
  */
 export const canSeeQualityTeamRegister = (roles: string[]): boolean =>
   hasReviewerRole(roles) || isAccountableManager(roles)
+
+/** SMS safety personnel register visibility. DoS manages; AM/SO can view with API-level row filtering. */
+export const canSeeSmsSafetyRegister = (roles: string[]): boolean =>
+  isDirectorOfSafety(roles) || isAccountableManager(roles) || isSafetyOfficer(roles)
 
 /** Can add, update, or delete training/qualification records: Quality Manager or Auditor only. */
 export const canAddTraining = (roles: string[]): boolean =>
@@ -176,26 +253,30 @@ export async function getCurrentUserProfile(
   roles: string[]
   departmentId: string | null
   organizationId: string | null
+  safetyOperationalArea: string | null
 }> {
   const client = supabase as SupabaseClientLike
   const { data } = await client
     .from('User')
-    .select('roles, role, departmentId, organizationId')
+    .select('roles, role, departmentId, organizationId, safetyOperationalArea')
     .eq('id', authUserId)
     .single()
   if (!data || typeof data !== 'object') {
-    return { roles: [], departmentId: null, organizationId: null }
+    return { roles: [], departmentId: null, organizationId: null, safetyOperationalArea: null }
   }
   const d = data as {
     roles?: string[]
     role?: string
     departmentId?: string | null
     organizationId?: string | null
+    safetyOperationalArea?: string | null
   }
-  const roles = Array.isArray(d.roles) && d.roles.length > 0 ? d.roles : d.role ? [d.role] : []
+  const raw = Array.isArray(d.roles) && d.roles.length > 0 ? d.roles : d.role ? [d.role] : []
+  const roles = normalizeAppUserRoles(raw.filter((x): x is string => typeof x === 'string'))
   return {
     roles,
     departmentId: d.departmentId ?? null,
     organizationId: d.organizationId ?? null,
+    safetyOperationalArea: d.safetyOperationalArea ?? null,
   }
 }

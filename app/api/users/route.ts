@@ -85,6 +85,7 @@ export async function POST(request: Request) {
       firstName,
       lastName,
       roles: rolesBody,
+      safetyOperationalArea,
       departmentId,
       organizationId,
       position,
@@ -123,6 +124,8 @@ export async function POST(request: Request) {
       'DEPARTMENT_HEAD',
       'STAFF',
       'FOCAL_PERSON',
+      'DIRECTOR_OF_SAFETY',
+      'SAFETY_OFFICER',
     ]
     const roles: string[] = Array.isArray(rolesBody)
       ? rolesBody.filter((r: unknown) => typeof r === 'string' && validRoles.includes(r.trim()))
@@ -130,6 +133,17 @@ export async function POST(request: Request) {
     if (roles.length === 0) {
       return NextResponse.json(
         { error: 'At least one role is required' },
+        { status: 400 }
+      )
+    }
+    const validSafetyAreas = ['airline_ops', 'mro_maintenance', 'airport_ground_ops', 'all', 'other']
+    const normalizedSafetyArea =
+      typeof safetyOperationalArea === 'string' && validSafetyAreas.includes(safetyOperationalArea)
+        ? safetyOperationalArea
+        : null
+    if (roles.includes('SAFETY_OFFICER') && !normalizedSafetyArea) {
+      return NextResponse.json(
+        { error: 'Safety operational area is required for Safety Officer role' },
         { status: 400 }
       )
     }
@@ -201,6 +215,7 @@ export async function POST(request: Request) {
       position:
         position && String(position).trim() ? String(position).trim() : null,
       phone: phone && String(phone).trim() ? String(phone).trim() : null,
+      safetyOperationalArea: normalizedSafetyArea,
       isActive: true,
       updatedAt: now,
     }
@@ -218,6 +233,7 @@ export async function POST(request: Request) {
         role,
         roles,
         position,
+        safetyOperationalArea,
         isActive,
         Department:departmentId (
           id,

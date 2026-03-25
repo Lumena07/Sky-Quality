@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { normalizeAppUserRoles } from '@/lib/permissions'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 
 /** Returns current user id and roles for permission checks on the client. */
@@ -16,7 +17,9 @@ export async function GET() {
 
     const { data: profile, error: profileError } = await supabase
       .from('User')
-      .select('id, email, roles, role, departmentId, organizationId')
+      .select(
+        'id, email, roles, role, departmentId, organizationId, safetyOperationalArea, firstName, lastName'
+      )
       .eq('id', user.id)
       .single()
 
@@ -28,16 +31,22 @@ export async function GET() {
           roles: [],
           departmentId: null,
           organizationId: null,
+          safetyOperationalArea: null,
+          firstName: null,
+          lastName: null,
         },
         { status: 200 }
       )
     }
 
-    const roles = Array.isArray(profile.roles) && profile.roles.length > 0
+    const rawRoles = Array.isArray(profile.roles) && profile.roles.length > 0
       ? profile.roles
       : profile.role
         ? [profile.role]
         : []
+    const roles = normalizeAppUserRoles(
+      rawRoles.filter((x: unknown): x is string => typeof x === 'string')
+    )
 
     return NextResponse.json({
       id: profile.id,
@@ -45,6 +54,9 @@ export async function GET() {
       roles,
       departmentId: profile.departmentId ?? null,
       organizationId: profile.organizationId ?? null,
+      safetyOperationalArea: profile.safetyOperationalArea ?? null,
+      firstName: profile.firstName ?? null,
+      lastName: profile.lastName ?? null,
     })
   } catch (error) {
     console.error('Error in /api/me:', error)

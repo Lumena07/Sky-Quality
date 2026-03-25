@@ -8,8 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
-import { setSessionCookie } from '@/components/auth/session-sync'
-import { isAccountableManager, isAdminOrQM } from '@/lib/permissions'
+import { setSessionCookie } from '@/lib/session-cookie'
 
 const LoginPage = () => {
   const router = useRouter()
@@ -39,18 +38,7 @@ const LoginPage = () => {
         setSessionCookie(data.session.access_token)
       }
 
-      const meRes = await fetch('/api/me', { credentials: 'same-origin' })
-      if (meRes.ok) {
-        const meData = await meRes.json()
-        const roles = Array.isArray(meData.roles) ? meData.roles : []
-        if (isAccountableManager(roles) && !isAdminOrQM(roles)) {
-          router.push('/dashboard/am')
-          router.refresh()
-          return
-        }
-      }
-
-      router.push('/dashboard')
+      router.push('/modules')
       router.refresh()
     } catch {
       setError('An error occurred. Please try again.')
@@ -63,7 +51,7 @@ const LoginPage = () => {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4 gap-6">
       <Image
         src="/logo.png"
-        alt="SKYAERO Aviation Limited eQMS"
+        alt="SKYAERO Aviation Limited — Safety and Quality Management System"
         width={976}
         height={439}
         className="w-full max-w-sm h-auto object-contain"
@@ -73,7 +61,7 @@ const LoginPage = () => {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-xl font-semibold text-center">Sign in</CardTitle>
-          <CardDescription className="text-center">Quality Management System</CardDescription>
+          <CardDescription className="text-center">Safety and Quality Management System</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -26,6 +26,8 @@ export async function PATCH(
       'DEPARTMENT_HEAD',
       'STAFF',
       'FOCAL_PERSON',
+      'DIRECTOR_OF_SAFETY',
+      'SAFETY_OFFICER',
     ]
     const updates: Record<string, unknown> = {}
     if (Array.isArray(body.roles)) {
@@ -35,6 +37,22 @@ export async function PATCH(
       if (roles.length > 0) {
         updates.roles = roles
         updates.role = roles[0]
+        if (roles.includes('SAFETY_OFFICER')) {
+          const validSafetyAreas = ['airline_ops', 'mro_maintenance', 'airport_ground_ops', 'all', 'other']
+          const area =
+            typeof body.safetyOperationalArea === 'string' && validSafetyAreas.includes(body.safetyOperationalArea)
+              ? body.safetyOperationalArea
+              : null
+          if (!area) {
+            return NextResponse.json(
+              { error: 'Safety operational area is required for Safety Officer role' },
+              { status: 400 }
+            )
+          }
+          updates.safetyOperationalArea = area
+        } else {
+          updates.safetyOperationalArea = null
+        }
       }
     } else if (typeof body.role === 'string' && body.role.trim()) {
       updates.role = body.role.trim()
@@ -68,6 +86,7 @@ export async function PATCH(
         role,
         roles,
         position,
+        safetyOperationalArea,
         isActive,
         Department:departmentId (
           id,

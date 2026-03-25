@@ -12,6 +12,10 @@ const ALLOWED_ENTITY_TYPES = [
   'cap',
   'quality-policy',
   'quality-policy-objectives',
+  'sms-report',
+  'sms-hazard',
+  'sms-capa',
+  'sms-investigation',
 ]
 const ALLOWED_FILE_TYPES = [
   'image/jpeg',

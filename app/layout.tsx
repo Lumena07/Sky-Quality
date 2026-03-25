@@ -8,8 +8,8 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Sky SQ - Quality Management System',
-  description: 'Internal Quality Management System for Aviation Company',
+  title: 'Sky SQ - Safety and Quality Management System',
+  description: 'Internal Safety and Quality Management System for Aviation Company',
 }
 
 export default async function RootLayout({
