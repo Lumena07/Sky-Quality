@@ -22,6 +22,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
+import {
+  CAP_RESOURCE_LABELS,
+  CAP_RESOURCE_VALUES,
+  capRequiresAccountableManager,
+  type CapResourceValue,
+} from '@/lib/cap-resources'
 
 type ApprovalType = 'cap' | 'cat' | null
 
@@ -34,6 +40,13 @@ type CorrectiveActionFromFinding = {
   catDueDate?: string
   capRejectionReason?: string
   catRejectionReason?: string
+  capResourceTypes?: string[]
+  amCapStatus?: string
+  amCapRejectionReason?: string
+  proposedCatDueDate?: string
+  proposedCatDueDateReason?: string
+  catDueDateProposalStatus?: string
+  catDueDateRejectionReason?: string
 }
 
 /** Get CorrectiveAction from finding API response; handles PostgREST relation key variants. */
@@ -64,11 +77,19 @@ const FindingDetailPage = () => {
   const [extensionRequests, setExtensionRequests] = useState<any[]>([])
   const [extensionDialogOpen, setExtensionDialogOpen] = useState(false)
   const [extReason, setExtReason] = useState('')
-  const [extCapDue, setExtCapDue] = useState('')
   const [extCloseOutDue, setExtCloseOutDue] = useState('')
   const [extSubmitting, setExtSubmitting] = useState(false)
   const [extReviewingId, setExtReviewingId] = useState<string | null>(null)
   const [extRejectDialog, setExtRejectDialog] = useState<{ requestId: string; notes: string } | null>(null)
+  const [capResourceSelection, setCapResourceSelection] = useState<string[]>(['NONE'])
+  const [amRejectOpen, setAmRejectOpen] = useState(false)
+  const [amRejectReason, setAmRejectReason] = useState('')
+  const [amReviewSubmitting, setAmReviewSubmitting] = useState(false)
+  const [proposalCatDueDate, setProposalCatDueDate] = useState('')
+  const [proposalCatReason, setProposalCatReason] = useState('')
+  const [proposalReviewSubmitting, setProposalReviewSubmitting] = useState(false)
+  const [proposalRejectOpen, setProposalRejectOpen] = useState(false)
+  const [proposalRejectReason, setProposalRejectReason] = useState('')
 
   useEffect(() => {
     const loadUser = async () => {
@@ -109,6 +130,19 @@ const FindingDetailPage = () => {
     if (finding && params.id) fetchExtensionRequests()
   }, [finding, params.id])
 
+  useEffect(() => {
+    if (!finding) return
+    const row = getCorrectiveActionFromFinding(finding as Record<string, unknown>)
+    const raw = row?.capResourceTypes
+    if (Array.isArray(raw) && raw.length > 0) {
+      setCapResourceSelection(raw.map((x) => String(x).toUpperCase()))
+    } else {
+      setCapResourceSelection(['NONE'])
+    }
+    setProposalCatDueDate(row?.proposedCatDueDate ? String(row.proposedCatDueDate).slice(0, 10) : '')
+    setProposalCatReason(row?.proposedCatDueDateReason ?? '')
+  }, [finding])
+
   const fetchFinding = async () => {
     setFetchError(null)
     try {
@@ -134,8 +168,14 @@ const FindingDetailPage = () => {
   const assignee = finding ? (finding.AssignedTo ?? finding.assignedTo) : null
   const assignedToId = finding?.assignedToId ?? finding?.AssignedTo?.id ?? finding?.assignedTo?.id
   const isAssignee = Boolean(currentUserId && assignedToId && currentUserId === assignedToId)
-  /** Only auditors of this finding's audit (or Quality Manager) can approve/reject CAP/CAT and extension requests. */
+  /** Only auditors of this finding's audit (or Quality Manager) can approve/reject CAP/CAT. */
   const canReviewCapCat = finding?.canReviewCapCat === true
+  const isQualityManagerUser = userRoles.includes('QUALITY_MANAGER')
+  const isAccountableManagerUser = userRoles.includes('ACCOUNTABLE_MANAGER')
+  /** CAT extension requests: Quality Manager only. */
+  const canReviewExtensionRequest = (req: { requestedCloseOutDueDate?: string | null; requestedCapDueDate?: string | null }) => {
+    return isQualityManagerUser && Boolean(req.requestedCloseOutDueDate) && !Boolean(req.requestedCapDueDate)
+  }
   const assigneeDisplayName = assignee
     ? [assignee.firstName, assignee.lastName].filter(Boolean).join(' ').trim() || assignee.email || '—'
     : '—'
@@ -143,16 +183,25 @@ const FindingDetailPage = () => {
   const ca = finding ? getCorrectiveActionFromFinding(finding) : null
 
   const capApproved = ca?.capStatus === 'APPROVED'
+  const needsAmCapApproval = capRequiresAccountableManager(ca?.capResourceTypes)
+  const amCapApproved = ca?.amCapStatus === 'APPROVED'
+  const amCapPending = ca?.amCapStatus === 'PENDING'
+  const amCapGateOk = !needsAmCapApproval || amCapApproved
   // Assignee can edit CAT only before submitting or when CAT was rejected (resubmit). Once saved (PENDING/APPROVED), read-only.
   const catSavedAndNotRejected =
     (ca?.correctiveActionTaken ?? '').toString().trim() !== '' &&
     ca?.catStatus !== 'REJECTED'
-  const canEditCat = isAssignee && capApproved && !catSavedAndNotRejected
+  const canEditCat = isAssignee && capApproved && amCapGateOk && !catSavedAndNotRejected
 
   // Root cause can be edited only before any CAP is submitted; once CAP exists it is locked
   const canEditRootCause = isAssignee && !ca?.actionPlan
   // CAP can be edited when first time (no CAP) or when CAP was rejected (resubmit only the CAP)
   const canEditCap = isAssignee && (!ca?.actionPlan || ca?.capStatus === 'REJECTED')
+  const canEditCatProposalAtCap = canEditCap
+  const canReviewCatProposal =
+    isQualityManagerUser &&
+    !!ca?.proposedCatDueDate &&
+    (ca?.catDueDateProposalStatus === 'PENDING')
 
   const rootCauseDueDate = finding?.dueDate ?? finding?.capDueDate
   const capDueDate = ca?.dueDate ?? finding?.capDueDate
@@ -168,6 +217,22 @@ const FindingDetailPage = () => {
   const getReviewEndpoint = (type: ApprovalType) => {
     if (!type) return ''
     return type === 'cap' ? `/api/findings/${params.id}/cap-review` : `/api/findings/${params.id}/cat-review`
+  }
+
+  const handleCapResourceToggle = (value: CapResourceValue, checked: boolean) => {
+    if (value === 'NONE') {
+      setCapResourceSelection(checked ? ['NONE'] : [])
+      return
+    }
+    setCapResourceSelection((prev) => {
+      const withoutNone = prev.filter((t) => t !== 'NONE')
+      if (checked) {
+        const next = [...withoutNone, value]
+        return Array.from(new Set(next))
+      }
+      const next = withoutNone.filter((t) => t !== value)
+      return next.length === 0 ? ['NONE'] : next
+    })
   }
 
   const handleSaveRootCauseAndCap = async () => {
@@ -190,7 +255,12 @@ const FindingDetailPage = () => {
         const res2 = await fetch(`/api/findings/${params.id}/corrective-action`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ actionPlan: editActionPlan }),
+          body: JSON.stringify({
+            actionPlan: editActionPlan,
+            capResourceTypes: capResourceSelection,
+            proposedCatDueDate: proposalCatDueDate || null,
+            proposedCatDueDateReason: proposalCatReason || null,
+          }),
           credentials: 'same-origin',
         })
         if (!res2.ok) {
@@ -302,7 +372,15 @@ const FindingDetailPage = () => {
     }
   }
 
-  const canReviewCap = canReviewCapCat && ca && (ca.capStatus === 'PENDING' || !ca.capStatus) && ca.actionPlan
+  const canReviewCap =
+    canReviewCapCat && ca && (ca.capStatus === 'PENDING' || !ca.capStatus) && ca.actionPlan
+
+  const canReviewAmCap =
+    isAccountableManagerUser &&
+    ca &&
+    ca.capStatus === 'APPROVED' &&
+    needsAmCapApproval &&
+    amCapPending
   const canReviewCat = canReviewCapCat && ca && (ca.catStatus === 'PENDING' || !ca.catStatus) && (ca.correctiveActionTaken || uploadedFiles.length > 0)
 
   if (loading) {
@@ -394,12 +472,180 @@ const FindingDetailPage = () => {
                   rows={4}
                   className="text-sm"
                 />
+                <fieldset className="space-y-2 rounded-md border p-3">
+                  <legend className="text-sm font-medium px-1">Resources required to implement the CAP</legend>
+                  <p className="text-xs text-muted-foreground">
+                    If anything other than &quot;No extra resources&quot; is selected, the Accountable Manager must
+                    approve after Quality approves the plan.
+                  </p>
+                  <div className="flex flex-col gap-2" role="group" aria-label="CAP resource types">
+                    {CAP_RESOURCE_VALUES.map((val) => (
+                      <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={capResourceSelection.includes(val)}
+                          onChange={(e) => handleCapResourceToggle(val, e.target.checked)}
+                          className="h-4 w-4 rounded border"
+                          aria-label={CAP_RESOURCE_LABELS[val]}
+                        />
+                        <span>{CAP_RESOURCE_LABELS[val]}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="space-y-2 rounded-md border p-3">
+                  <legend className="text-sm font-medium px-1">Longer CAT due date at CAP entry (optional)</legend>
+                  <p className="text-xs text-muted-foreground">
+                    Use this when you already know, while entering CAP, that the current CAT due date is too short.
+                    This is different from a later extension request and is reviewed by Quality Manager.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="proposal-cat-due">Proposed CAT due date</Label>
+                      <Input
+                        id="proposal-cat-due"
+                        type="date"
+                        value={proposalCatDueDate}
+                        onChange={(e) => setProposalCatDueDate(e.target.value)}
+                        aria-label="Proposed longer CAT due date"
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-1">
+                      <Label htmlFor="proposal-cat-reason">Reason</Label>
+                      <Input
+                        id="proposal-cat-reason"
+                        value={proposalCatReason}
+                        onChange={(e) => setProposalCatReason(e.target.value)}
+                        placeholder="Why CAT needs more time..."
+                        aria-label="Reason for longer CAT due date"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
                 <Button size="sm" onClick={handleSaveRootCauseAndCap} disabled={saving !== null}>
                   {saving === 'root_cause_cap' ? 'Saving...' : canEditRootCause ? 'Save Root Cause & CAP' : 'Save CAP'}
                 </Button>
               </>
             ) : (
-              <p className="text-sm whitespace-pre-wrap">{ca?.actionPlan || '—'}</p>
+              <>
+                <p className="text-sm whitespace-pre-wrap">{ca?.actionPlan || '—'}</p>
+                {ca?.capResourceTypes && Array.isArray(ca.capResourceTypes) && ca.capResourceTypes.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Resources: </span>
+                    {(ca.capResourceTypes as string[])
+                      .map((k) => CAP_RESOURCE_LABELS[k as CapResourceValue] ?? k)
+                      .join(', ')}
+                  </div>
+                )}
+                {ca?.proposedCatDueDate && (
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <div>
+                      <span className="font-medium text-foreground">Proposed longer CAT due date: </span>
+                      {formatDate(ca.proposedCatDueDate)}
+                    </div>
+                    {ca?.proposedCatDueDateReason && (
+                      <div>
+                        <span className="font-medium text-foreground">Reason: </span>
+                        {ca.proposedCatDueDateReason}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-medium text-foreground">QM proposal review: </span>
+                      {getStatusBadge(ca?.catDueDateProposalStatus)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {ca?.catDueDateProposalStatus === 'REJECTED' && ca?.catDueDateRejectionReason && (
+              <div className="rounded-md bg-red-50 p-2 text-sm text-red-800">
+                <p className="font-medium">Longer CAT due-date proposal rejected</p>
+                <p className="mt-1 whitespace-pre-wrap">{ca.catDueDateRejectionReason}</p>
+              </div>
+            )}
+            {canReviewCatProposal && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    setProposalReviewSubmitting(true)
+                    try {
+                      const res = await fetch(`/api/findings/${params.id}/cat-due-proposal-review`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ approved: true }),
+                        credentials: 'same-origin',
+                      })
+                      if (res.ok) await fetchFinding()
+                      else alert((await res.json().catch(() => ({}))).error ?? 'Failed to approve')
+                    } finally {
+                      setProposalReviewSubmitting(false)
+                    }
+                  }}
+                  disabled={proposalReviewSubmitting}
+                >
+                  <Check className="mr-2 h-4 w-4" /> Approve longer CAT due date
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setProposalRejectReason('')
+                    setProposalRejectOpen(true)
+                  }}
+                  disabled={proposalReviewSubmitting}
+                >
+                  <X className="mr-2 h-4 w-4" /> Reject longer CAT due date
+                </Button>
+              </div>
+            )}
+            {capApproved && needsAmCapApproval && (
+              <div className="text-sm">
+                <span className="font-medium">Accountable Manager (resources): </span>
+                {getStatusBadge(ca?.amCapStatus)}
+              </div>
+            )}
+            {canReviewAmCap && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    setAmReviewSubmitting(true)
+                    try {
+                      const res = await fetch(`/api/findings/${params.id}/am-cap-review`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ approved: true }),
+                        credentials: 'same-origin',
+                      })
+                      if (res.ok) await fetchFinding()
+                      else alert((await res.json().catch(() => ({}))).error ?? 'Failed to approve')
+                    } finally {
+                      setAmReviewSubmitting(false)
+                    }
+                  }}
+                  disabled={amReviewSubmitting}
+                >
+                  <Check className="mr-2 h-4 w-4" /> Approve (Accountable Manager)
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setAmRejectReason('')
+                    setAmRejectOpen(true)
+                  }}
+                  disabled={amReviewSubmitting}
+                >
+                  <X className="mr-2 h-4 w-4" /> Reject (Accountable Manager)
+                </Button>
+              </div>
+            )}
+            {ca?.amCapStatus === 'REJECTED' && ca.amCapRejectionReason && (
+              <div className="rounded-md bg-red-50 p-2 text-sm text-red-800">
+                <p className="font-medium">Accountable Manager rejection</p>
+                <p className="mt-1 whitespace-pre-wrap">{ca.amCapRejectionReason}</p>
+              </div>
             )}
             {ca?.capStatus === 'REJECTED' && ca.capRejectionReason && (
               <div className="rounded-md bg-red-50 p-2 text-sm text-red-800">
@@ -433,6 +679,12 @@ const FindingDetailPage = () => {
             {isAssignee && !capApproved && (
               <p className="text-sm text-muted-foreground rounded-md bg-muted p-2">
                 Corrective Action Plan must be approved before you can enter Corrective Action Taken and upload evidence.
+              </p>
+            )}
+            {isAssignee && capApproved && needsAmCapApproval && !amCapApproved && (
+              <p className="text-sm text-muted-foreground rounded-md bg-muted p-2">
+                Accountable Manager approval is required for this CAP (resources) before you can enter Corrective Action
+                Taken.
               </p>
             )}
             {canEditCat ? (
@@ -534,7 +786,6 @@ const FindingDetailPage = () => {
                 variant="outline"
                 onClick={() => {
                   setExtReason('')
-                  setExtCapDue('')
                   setExtCloseOutDue('')
                   setExtensionDialogOpen(true)
                 }}
@@ -570,15 +821,15 @@ const FindingDetailPage = () => {
                     </div>
                     <p className="font-medium mb-1">Reason</p>
                     <p className="whitespace-pre-wrap text-muted-foreground mb-2">{req.reason}</p>
-                    {(req.requestedCapDueDate || req.requestedCloseOutDueDate) && (
+                    {req.requestedCloseOutDueDate && (
                       <p className="text-muted-foreground text-xs mb-2">
-                        CAP due: {req.requestedCapDueDate ?? '—'} · Close-out due: {req.requestedCloseOutDueDate ?? '—'}
+                        CAT extension requested to: {req.requestedCloseOutDueDate ?? '—'}
                       </p>
                     )}
                     {req.status === 'REJECTED' && req.reviewNotes && (
                       <p className="text-red-700 text-xs">Review notes: {req.reviewNotes}</p>
                     )}
-                    {canReviewCapCat && req.status === 'PENDING' && (
+                    {canReviewExtensionRequest(req) && req.status === 'PENDING' && (
                       <div className="flex gap-2 mt-2">
                         <Button
                           size="sm"
@@ -626,7 +877,9 @@ const FindingDetailPage = () => {
             <DialogHeader>
               <DialogTitle>Request extension</DialogTitle>
               <DialogDescription>
-                Request an extension for CAP and/or close-out due dates. A reviewer will approve or reject.
+                Request a CAT extension when the current CAT due date is close and you may miss it. This is different
+                from the longer CAT due date proposed during CAP entry. CAT extension requests are approved by Quality
+                Manager only.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-2">
@@ -640,32 +893,21 @@ const FindingDetailPage = () => {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="ext-cap">Requested CAP due date</Label>
-                  <Input
-                    id="ext-cap"
-                    type="date"
-                    value={extCapDue}
-                    onChange={(e) => setExtCapDue(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ext-close">Requested close-out due date</Label>
-                  <Input
-                    id="ext-close"
-                    type="date"
-                    value={extCloseOutDue}
-                    onChange={(e) => setExtCloseOutDue(e.target.value)}
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="ext-close">Requested new CAT due date</Label>
+                <Input
+                  id="ext-close"
+                  type="date"
+                  value={extCloseOutDue}
+                  onChange={(e) => setExtCloseOutDue(e.target.value)}
+                />
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setExtensionDialogOpen(false)}>
                   Cancel
                 </Button>
                 <Button
-                  disabled={!extReason.trim() || extSubmitting}
+                  disabled={!extReason.trim() || !extCloseOutDue || extSubmitting}
                   onClick={async () => {
                     setExtSubmitting(true)
                     try {
@@ -674,7 +916,7 @@ const FindingDetailPage = () => {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           reason: extReason.trim(),
-                          requestedCapDueDate: extCapDue || null,
+                          requestedCapDueDate: null,
                           requestedCloseOutDueDate: extCloseOutDue || null,
                         }),
                         credentials: 'same-origin',
@@ -694,6 +936,98 @@ const FindingDetailPage = () => {
                   {extSubmitting ? 'Submitting...' : 'Submit'}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={amRejectOpen} onOpenChange={setAmRejectOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reject CAP (Accountable Manager)</DialogTitle>
+              <DialogDescription>Provide a reason. The assignee can revise and resubmit the plan.</DialogDescription>
+            </DialogHeader>
+            <Textarea
+              value={amRejectReason}
+              onChange={(e) => setAmRejectReason(e.target.value)}
+              placeholder="Rejection reason..."
+              rows={3}
+              className="mt-2"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setAmRejectOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={amReviewSubmitting || !amRejectReason.trim()}
+                onClick={async () => {
+                  setAmReviewSubmitting(true)
+                  try {
+                    const res = await fetch(`/api/findings/${params.id}/am-cap-review`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ approved: false, rejectionReason: amRejectReason.trim() }),
+                      credentials: 'same-origin',
+                    })
+                    if (res.ok) {
+                      setAmRejectOpen(false)
+                      await fetchFinding()
+                    } else {
+                      alert((await res.json().catch(() => ({}))).error ?? 'Failed to reject')
+                    }
+                  } finally {
+                    setAmReviewSubmitting(false)
+                  }
+                }}
+              >
+                {amReviewSubmitting ? 'Submitting...' : 'Reject'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={proposalRejectOpen} onOpenChange={setProposalRejectOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reject longer CAT due date proposal</DialogTitle>
+              <DialogDescription>Provide a reason for rejecting the upfront CAT due date proposal.</DialogDescription>
+            </DialogHeader>
+            <Textarea
+              value={proposalRejectReason}
+              onChange={(e) => setProposalRejectReason(e.target.value)}
+              placeholder="Rejection reason..."
+              rows={3}
+              className="mt-2"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setProposalRejectOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={proposalReviewSubmitting || !proposalRejectReason.trim()}
+                onClick={async () => {
+                  setProposalReviewSubmitting(true)
+                  try {
+                    const res = await fetch(`/api/findings/${params.id}/cat-due-proposal-review`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ approved: false, rejectionReason: proposalRejectReason.trim() }),
+                      credentials: 'same-origin',
+                    })
+                    if (res.ok) {
+                      setProposalRejectOpen(false)
+                      await fetchFinding()
+                    } else {
+                      alert((await res.json().catch(() => ({}))).error ?? 'Failed to reject')
+                    }
+                  } finally {
+                    setProposalReviewSubmitting(false)
+                  }
+                }}
+              >
+                {proposalReviewSubmitting ? 'Submitting...' : 'Reject'}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

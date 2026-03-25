@@ -40,6 +40,14 @@ type RescheduleRequestRow = {
 type AmDashboardData = {
   escalations: EscalationRow[]
   pendingRescheduleRequests: RescheduleRequestRow[]
+  pendingCapApprovals?: Array<{
+    id: string
+    findingId: string
+    dueDate: string
+    capStatus: string | null
+    amCapStatus: string | null
+    Finding?: Array<{ findingNumber: string; status: string; capDueDate: string | null }> | { findingNumber: string; status: string; capDueDate: string | null }
+  }>
 }
 
 const AmDashboardPage = () => {
@@ -148,6 +156,14 @@ const AmDashboardPage = () => {
     return trigger
   }
 
+  const getCapFindingNumber = (
+    f: NonNullable<NonNullable<AmDashboardData['pendingCapApprovals']>[number]['Finding']>
+  ): string => {
+    if (!f) return '—'
+    const arr = Array.isArray(f) ? f : [f]
+    return arr[0]?.findingNumber ?? '—'
+  }
+
   return (
     <MainLayout>
       <div className="p-8">
@@ -170,6 +186,57 @@ const AmDashboardPage = () => {
         </div>
 
         <div className="max-w-5xl">
+          <Card className="mb-6">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0">
+              <div>
+                <CardTitle>Pending CAP approvals</CardTitle>
+                <CardDescription>Corrective Action Plans awaiting your approval (resources required).</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs">
+                  {(data.pendingCapApprovals ?? []).length} pending
+                </Badge>
+                <AlertCircle className="h-4 w-4 text-amber-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(data.pendingCapApprovals ?? []).length === 0 ? (
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <p className="text-sm font-medium">No CAP approvals pending.</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    When Quality approves a CAP that requires resources, it will appear here for your approval.
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-3" role="list">
+                  {(data.pendingCapApprovals ?? []).slice(0, 15).map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{getCapFindingNumber(c.Finding as any)}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            AM approval pending
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">CAP due {formatDate(c.dueDate)}</p>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Link href={`/findings/${c.findingId}`}>
+                          <Button variant="outline" size="sm" aria-label={`Review CAP for finding ${getCapFindingNumber(c.Finding as any)}`}>
+                            Review
+                          </Button>
+                        </Link>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="flex flex-row items-start justify-between space-y-0">
               <div>

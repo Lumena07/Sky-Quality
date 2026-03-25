@@ -5,6 +5,7 @@ import { generateFindingNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
 import { calculateDeadlines } from '@/lib/audit-deadlines'
 import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard } from '@/lib/permissions'
+import { evaluateOverdue } from '@/lib/finding-overdue'
 
 export async function GET(request: Request) {
   try {
@@ -50,11 +51,6 @@ export async function GET(request: Request) {
     if (departmentId) {
       query = query.eq('departmentId', departmentId)
     }
-    if (overdue === 'true') {
-      query = query
-        .lt('dueDate', new Date().toISOString())
-        .neq('status', 'CLOSED')
-    }
     if (needsFollowUp) {
       query = query.neq('status', 'CLOSED')
     }
@@ -70,6 +66,31 @@ export async function GET(request: Request) {
     }
 
     let result = findings ?? []
+
+    if (overdue === 'true') {
+      const nowIso = new Date().toISOString()
+      result = result.filter((f: Record<string, unknown>) => {
+        const correctiveAction = Array.isArray(f.CorrectiveAction)
+          ? (f.CorrectiveAction as Record<string, unknown>[])[0]
+          : (f.CorrectiveAction as Record<string, unknown> | null | undefined)
+        const ca = correctiveAction ?? (f.correctiveAction as Record<string, unknown> | null | undefined)
+        const overdueEval = evaluateOverdue(
+          {
+            findingStatus: f.status as string | null | undefined,
+            findingDueDate: f.dueDate as string | null | undefined,
+            findingCapDueDate: f.capDueDate as string | null | undefined,
+            hasCorrectiveAction: Boolean(ca && (ca as Record<string, unknown>)?.id),
+            caDueDate: (ca?.dueDate as string | null | undefined) ?? null,
+            capStatus: (ca?.capStatus as string | null | undefined) ?? null,
+            catDueDate: (ca?.catDueDate as string | null | undefined) ?? null,
+            catStatus: (ca?.catStatus as string | null | undefined) ?? null,
+            correctiveActionTaken: (ca?.correctiveActionTaken as string | null | undefined) ?? null,
+          },
+          nowIso
+        )
+        return overdueEval.isOverdue
+      })
+    }
 
     if (needsFollowUp) {
       const now = new Date().toISOString()

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { isCapOverdue } from '@/lib/finding-overdue'
 
 export async function GET() {
   try {
@@ -19,7 +20,7 @@ export async function GET() {
       totalAuditsResult,
       activeAuditsResult,
       openFindingsResult,
-      overdueCAPsResult,
+      findingsWithCaResult,
       pendingDocumentsResult,
       pendingAssessmentHazardsResult,
     ] = await Promise.all([
@@ -33,10 +34,23 @@ export async function GET() {
         .select('*', { count: 'exact', head: true })
         .in('status', ['OPEN', 'IN_PROGRESS']),
       supabase
-        .from('CorrectiveAction')
-        .select('*', { count: 'exact', head: true })
-        .in('status', ['OPEN', 'IN_PROGRESS'])
-        .lt('dueDate', now.toISOString()),
+        .from('Finding')
+        .select(
+          `
+          status,
+          dueDate,
+          capDueDate,
+          CorrectiveAction(
+            id,
+            dueDate,
+            capStatus,
+            catDueDate,
+            catStatus,
+            correctiveActionTaken
+          )
+        `
+        )
+        .neq('status', 'CLOSED'),
       supabase
         .from('Document')
         .select('*', { count: 'exact', head: true })
@@ -50,7 +64,28 @@ export async function GET() {
     const totalAudits = totalAuditsResult.count ?? 0
     const activeAudits = activeAuditsResult.count ?? 0
     const openFindings = openFindingsResult.count ?? 0
-    const overdueCAPs = overdueCAPsResult.count ?? 0
+    const nowIso = now.toISOString()
+    const overdueCAPs = (findingsWithCaResult.data ?? []).filter((row: Record<string, unknown>) => {
+      const caRaw = row.CorrectiveAction
+      const ca = Array.isArray(caRaw) ? caRaw[0] : caRaw
+      return isCapOverdue(
+        {
+          findingStatus: row.status as string | null | undefined,
+          findingDueDate: row.dueDate as string | null | undefined,
+          findingCapDueDate: row.capDueDate as string | null | undefined,
+          hasCorrectiveAction: Boolean(ca),
+          caDueDate: (ca as Record<string, unknown> | null)?.dueDate as string | null | undefined,
+          capStatus: (ca as Record<string, unknown> | null)?.capStatus as string | null | undefined,
+          catDueDate: (ca as Record<string, unknown> | null)?.catDueDate as string | null | undefined,
+          catStatus: (ca as Record<string, unknown> | null)?.catStatus as string | null | undefined,
+          correctiveActionTaken: (ca as Record<string, unknown> | null)?.correctiveActionTaken as
+            | string
+            | null
+            | undefined,
+        },
+        nowIso
+      )
+    }).length
     const pendingDocuments = pendingDocumentsResult.count ?? 0
     const pendingAssessmentHazards = pendingAssessmentHazardsResult.count ?? 0
 

@@ -9,6 +9,7 @@ import { Plus, AlertCircle, Clock, CheckCircle, Download } from 'lucide-react'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { exportFindingsToExcel } from '@/lib/export/excel'
+import { evaluateOverdue } from '@/lib/finding-overdue'
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,21 @@ const getCorrectiveAction = (finding: Record<string, unknown>) => {
   if (Array.isArray(raw) && raw.length > 0) return raw[0] as Record<string, unknown>
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>
   return null
+}
+
+const getOverdueForFinding = (finding: Record<string, unknown>) => {
+  const ca = getCorrectiveAction(finding)
+  return evaluateOverdue({
+    findingStatus: finding.status as string | null | undefined,
+    findingDueDate: finding.dueDate as string | null | undefined,
+    findingCapDueDate: finding.capDueDate as string | null | undefined,
+    hasCorrectiveAction: Boolean((ca as Record<string, unknown> | null)?.id),
+    caDueDate: (ca?.dueDate as string | null | undefined) ?? null,
+    capStatus: (ca?.capStatus as string | null | undefined) ?? null,
+    catDueDate: (ca?.catDueDate as string | null | undefined) ?? null,
+    catStatus: (ca?.catStatus as string | null | undefined) ?? null,
+    correctiveActionTaken: (ca?.correctiveActionTaken as string | null | undefined) ?? null,
+  })
 }
 
 const FindingsPage = () => {
@@ -98,9 +114,7 @@ const FindingsPage = () => {
     }
   }
 
-  const overdueCount = findings.filter(
-    (f) => f.dueDate && new Date(f.dueDate) < new Date() && f.status !== 'CLOSED'
-  ).length
+  const overdueCount = findings.filter((f) => getOverdueForFinding(f).isOverdue).length
 
   const handleExportExcel = () => {
     const exportData = findings.map((finding) => ({
@@ -257,10 +271,8 @@ const FindingsPage = () => {
             ) : (
               <div className="space-y-4">
                 {findings.map((finding) => {
-                  const isOverdue =
-                    finding.dueDate &&
-                    new Date(finding.dueDate) < new Date() &&
-                    finding.status !== 'CLOSED'
+                  const overdueEval = getOverdueForFinding(finding)
+                  const isOverdue = overdueEval.isOverdue
                   const assignee = finding.AssignedTo ?? finding.assignedTo
                   const assigneeName = assignee
                     ? [assignee.firstName, assignee.lastName].filter(Boolean).join(' ').trim() || assignee.email || '—'
@@ -289,7 +301,13 @@ const FindingsPage = () => {
                               title={finding.severity}
                             />
                             {isOverdue && (
-                              <Badge variant="destructive">Overdue</Badge>
+                              <Badge variant="destructive">
+                                {overdueEval.kind === 'CAP'
+                                  ? 'Overdue CAP'
+                                  : overdueEval.kind === 'CAT'
+                                    ? 'Overdue CAT'
+                                    : 'Overdue'}
+                              </Badge>
                             )}
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">

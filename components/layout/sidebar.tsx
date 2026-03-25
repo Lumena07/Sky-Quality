@@ -78,7 +78,6 @@ type SidebarNavEntry =
 
 const allMenuItems: MenuLinkItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/sms/risk/report', label: 'Report Hazard / Occurrence', icon: Siren },
   { href: '/quality-policy', label: 'Quality Policy & Objectives', icon: Target },
   { href: '/quality-team', label: 'Quality team register', icon: Users },
   { href: '/audit-plan', label: 'Quality Programme', icon: CalendarCheck },
@@ -89,6 +88,7 @@ const allMenuItems: MenuLinkItem[] = [
   { href: '/training', label: 'Training & Qualification', icon: BookOpen },
   { ...amDashboardItem },
   { href: '/dashboard/performance', label: 'Performance', icon: TrendingUp },
+  { href: '/sms/risk/report', label: 'Report Hazard / Occurrence', icon: Siren },
   { href: '/activity-log', label: 'Activity Log', icon: History },
   { href: '/admin', label: 'Admin', icon: Settings },
 ]

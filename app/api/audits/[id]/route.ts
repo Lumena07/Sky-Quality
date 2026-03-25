@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
 import { getCurrentUserProfile, canEditAudit } from '@/lib/permissions'
+import { deleteLocalPublicUpload } from '@/lib/delete-local-upload'
 
 /** Resolve dayRef + time (HH:mm) to ISO datetime using audit start/end. */
 function resolveScheduleDateTime(
@@ -384,6 +385,23 @@ export async function PATCH(
             console.error('Error updating AuditPlan lastDoneDate:', planUpdateError)
           }
         }
+      }
+    }
+
+    if (status === 'CLOSED') {
+      const { data: focalDocs } = await supabase
+        .from('AuditDocument')
+        .select('id, fileUrl')
+        .eq('auditId', params.id)
+        .eq('documentKind', 'FOCAL_PRE_AUDIT')
+
+      const docRows = (focalDocs ?? []) as Array<{ id: string; fileUrl: string | null }>
+      for (const doc of docRows) {
+        if (doc.fileUrl) await deleteLocalPublicUpload(doc.fileUrl)
+      }
+      if (docRows.length > 0) {
+        const docIds = docRows.map((d) => d.id)
+        await supabase.from('AuditDocument').delete().in('id', docIds)
       }
     }
 

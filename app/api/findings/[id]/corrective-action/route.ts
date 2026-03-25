@@ -1,6 +1,11 @@
 import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import {
+  capRequiresAccountableManager,
+  normalizeCapResourceTypes,
+  validateCapResourceTypes,
+} from '@/lib/cap-resources'
 
 /** Notify auditors of the finding's audit that assignee submitted CAP or CAT for review. */
 async function notifyAuditorsForFinding(
@@ -81,10 +86,14 @@ export async function PATCH(
     const body = await request.clone().json().catch(() => ({}))
     const actionPlan = typeof body.actionPlan === 'string' ? body.actionPlan.trim() : null
     const correctiveActionTaken = typeof body.correctiveActionTaken === 'string' ? body.correctiveActionTaken.trim() : null
+    const proposedCatDueDateInput =
+      typeof body.proposedCatDueDate === 'string' ? body.proposedCatDueDate.trim() : ''
+    const proposedCatDueDateReasonInput =
+      typeof body.proposedCatDueDateReason === 'string' ? body.proposedCatDueDateReason.trim() : ''
 
     const { data: existingCa } = await supabase
       .from('CorrectiveAction')
-      .select('id, actionPlan, dueDate, catDueDate, capStatus')
+      .select('id, actionPlan, dueDate, catDueDate, capStatus, capResourceTypes, amCapStatus')
       .eq('findingId', findingId)
       .single()
 
@@ -95,6 +104,21 @@ export async function PATCH(
           { error: 'Corrective Action Plan must be approved before you can save Corrective Action Taken' },
           { status: 400 }
         )
+      }
+      const caRow = existingCa as {
+        capResourceTypes?: string[] | null
+        amCapStatus?: string | null
+      } | null
+      if (capRequiresAccountableManager(caRow?.capResourceTypes ?? null)) {
+        if (caRow?.amCapStatus !== 'APPROVED') {
+          return NextResponse.json(
+            {
+              error:
+                'Accountable Manager must approve this CAP (resources required) before you can submit Corrective Action Taken.',
+            },
+            { status: 400 }
+          )
+        }
       }
     }
 
@@ -108,10 +132,39 @@ export async function PATCH(
       caId = (existingCa as { id: string }).id
       const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
       if (actionPlan !== null) {
+        let resourceTypes =
+          body.capResourceTypes !== undefined
+            ? normalizeCapResourceTypes(body.capResourceTypes)
+            : normalizeCapResourceTypes((existingCa as { capResourceTypes?: string[] }).capResourceTypes)
+        if (resourceTypes.length === 0) resourceTypes = ['NONE']
+        const val = validateCapResourceTypes(resourceTypes)
+        if (!val.ok) {
+          return NextResponse.json({ error: val.error }, { status: 400 })
+        }
         updates.actionPlan = actionPlan
         updates.capStatus = 'PENDING'
         updates.capRejectionReason = null
         updates.capEnteredAt = new Date().toISOString()
+        updates.capResourceTypes = resourceTypes
+        updates.amCapStatus = 'NOT_REQUIRED'
+        updates.amCapReviewedById = null
+        updates.amCapReviewedAt = null
+        updates.amCapRejectionReason = null
+        if (proposedCatDueDateInput) {
+          updates.proposedCatDueDate = new Date(proposedCatDueDateInput).toISOString()
+          updates.proposedCatDueDateReason = proposedCatDueDateReasonInput || null
+          updates.catDueDateProposalStatus = 'PENDING'
+          updates.catDueDateReviewedById = null
+          updates.catDueDateReviewedAt = null
+          updates.catDueDateRejectionReason = null
+        } else {
+          updates.proposedCatDueDate = null
+          updates.proposedCatDueDateReason = null
+          updates.catDueDateProposalStatus = 'NOT_REQUESTED'
+          updates.catDueDateReviewedById = null
+          updates.catDueDateReviewedAt = null
+          updates.catDueDateRejectionReason = null
+        }
       }
       if (correctiveActionTaken !== null) {
         updates.correctiveActionTaken = correctiveActionTaken
@@ -142,6 +195,28 @@ export async function PATCH(
         )
       }
       const now = new Date().toISOString()
+      let resourceTypes =
+        body.capResourceTypes !== undefined
+          ? normalizeCapResourceTypes(body.capResourceTypes)
+          : ['NONE']
+      if (resourceTypes.length === 0) resourceTypes = ['NONE']
+      const val = validateCapResourceTypes(resourceTypes)
+      if (!val.ok) {
+        return NextResponse.json({ error: val.error }, { status: 400 })
+      }
+      if (
+        correctiveActionTaken !== null &&
+        correctiveActionTaken !== '' &&
+        capRequiresAccountableManager(resourceTypes)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Submit your Corrective Action Plan first. After Quality Manager and Accountable Manager approve, you can submit Corrective Action Taken.',
+          },
+          { status: 400 }
+        )
+      }
       const { data: created, error: insertErr } = await supabase
         .from('CorrectiveAction')
         .insert({
@@ -153,6 +228,15 @@ export async function PATCH(
           updatedAt: now,
           capStatus: 'PENDING',
           capEnteredAt: now,
+          capResourceTypes: resourceTypes,
+          amCapStatus: 'NOT_REQUIRED',
+          proposedCatDueDate: proposedCatDueDateInput
+            ? new Date(proposedCatDueDateInput).toISOString()
+            : null,
+          proposedCatDueDateReason: proposedCatDueDateInput
+            ? proposedCatDueDateReasonInput || null
+            : null,
+          catDueDateProposalStatus: proposedCatDueDateInput ? 'PENDING' : 'NOT_REQUESTED',
           ...(correctiveActionTaken !== null && correctiveActionTaken !== ''
             ? {
                 correctiveActionTaken,
@@ -200,6 +284,27 @@ export async function PATCH(
           findingNumber,
           submittedByUserId: user.id,
           kind: 'cat',
+        })
+      }
+    }
+
+    if (actionPlan !== null && proposedCatDueDateInput) {
+      const { data: qmUsers } = await supabase
+        .from('User')
+        .select('id')
+        .eq('isActive', true)
+        .contains('roles', ['QUALITY_MANAGER'])
+      for (const row of qmUsers ?? []) {
+        const uid = (row as { id: string }).id
+        if (!uid || uid === user.id) continue
+        await supabase.from('Notification').insert({
+          id: randomUUID(),
+          userId: uid,
+          type: 'SYSTEM_ALERT',
+          title: 'Longer CAT due date proposal submitted',
+          message: `Finding ${findingNumber ?? findingId}: a longer CAT due date was proposed during CAP entry and needs Quality Manager review.`,
+          link: `/findings/${findingId}`,
+          findingId,
         })
       }
     }

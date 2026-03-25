@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserProfile, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
 import { computeKpis } from '@/lib/kpi-computation'
+import { isCapOverdue, isCatOverdue } from '@/lib/finding-overdue'
 
 /** Can view Performance dashboard: reviewers (QM, auditors) or Accountable Manager. */
 const canViewPerformanceDashboard = (roles: string[]): boolean =>
@@ -148,8 +149,7 @@ export async function GET(request: Request) {
       auditsCompletedResult,
       findingsClosedResult,
       findingsOpenedResult,
-      overdueAtEndResult,
-      overdueCatNowResult,
+      findingsWithCaResult,
     ] = await Promise.all([
       supabase
         .from('Audit')
@@ -167,19 +167,50 @@ export async function GET(request: Request) {
         .in('status', ['OPEN', 'IN_PROGRESS'])
         .gte('createdAt', fromIso),
       supabase
-        .from('CorrectiveAction')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'OPEN')
-        .lt('dueDate', new Date().toISOString()),
-      supabase
-        .from('CorrectiveAction')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'OPEN')
-        .not('catDueDate', 'is', null)
-        .lt('catDueDate', new Date().toISOString())
-        .neq('catStatus', 'APPROVED')
-        .is('completionDate', null),
+        .from('Finding')
+        .select(
+          `
+          status,
+          dueDate,
+          capDueDate,
+          CorrectiveAction(
+            id,
+            dueDate,
+            capStatus,
+            catDueDate,
+            catStatus,
+            correctiveActionTaken
+          )
+        `
+        )
+        .neq('status', 'CLOSED'),
     ])
+
+    const nowIso = new Date().toISOString()
+    let overdueCAPsNow = 0
+    let overdueCATsNow = 0
+    for (const row of (findingsWithCaResult.data ?? []) as Array<Record<string, unknown>>) {
+      const caRaw = row.CorrectiveAction
+      const ca = Array.isArray(caRaw) ? caRaw[0] : caRaw
+      const normalized = {
+        findingStatus: row.status as string | null | undefined,
+        findingDueDate: row.dueDate as string | null | undefined,
+        findingCapDueDate: row.capDueDate as string | null | undefined,
+        hasCorrectiveAction: Boolean(ca),
+        caDueDate: (ca as Record<string, unknown> | null)?.dueDate as string | null | undefined,
+        capStatus: (ca as Record<string, unknown> | null)?.capStatus as string | null | undefined,
+        catDueDate: (ca as Record<string, unknown> | null)?.catDueDate as string | null | undefined,
+        catStatus: (ca as Record<string, unknown> | null)?.catStatus as string | null | undefined,
+        correctiveActionTaken: (ca as Record<string, unknown> | null)?.correctiveActionTaken as
+          | string
+          | null
+          | undefined,
+      }
+      const capOverdue = isCapOverdue(normalized, nowIso)
+      const catOverdue = isCatOverdue(normalized, nowIso)
+      if (capOverdue) overdueCAPsNow += 1
+      if (catOverdue) overdueCATsNow += 1
+    }
 
     const { data: byDepartment } = await supabase
       .from('Finding')
@@ -210,8 +241,8 @@ export async function GET(request: Request) {
       auditsCompleted: auditsCompletedResult.count ?? 0,
       findingsClosed: findingsClosedResult.count ?? 0,
       findingsOpened: findingsOpenedResult.count ?? 0,
-      overdueCAPsNow: overdueAtEndResult.count ?? 0,
-      overdueCATsNow: overdueCatNowResult.count ?? 0,
+      overdueCAPsNow,
+      overdueCATsNow,
       byDepartment: Object.entries(deptOpen).map(([id, v]) => ({
         departmentId: id,
         departmentName: v.name,

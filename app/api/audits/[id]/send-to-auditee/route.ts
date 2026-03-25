@@ -40,7 +40,9 @@ export async function POST(
 
     const { data: audit, error: auditError } = await supabase
       .from('Audit')
-      .select('id, title, status, checklistId, openingMeetingAt, closingMeetingAt, ScheduleItems:AuditScheduleItem(id)')
+      .select(
+        'id, title, status, type, checklistId, openingMeetingAt, closingMeetingAt, ScheduleItems:AuditScheduleItem(id)'
+      )
       .eq('id', params.id)
       .single()
 
@@ -85,12 +87,19 @@ export async function POST(
       .filter(Boolean) as string[]
     const uniqueUserIds = Array.from(new Set(userIds))
 
+    const isExternalType =
+      (audit as { type?: string }).type === 'EXTERNAL' ||
+      (audit as { type?: string }).type === 'THIRD_PARTY'
+    const docSentence = isExternalType
+      ? ' Please upload the requested pre-audit documentation using the audit overview so auditors can review it.'
+      : ''
+
     const notifications = uniqueUserIds.map((userId) => ({
       id: randomUUID(),
       userId,
       type: 'AUDIT_REMINDER',
       title: 'Audit checklist and schedule',
-      message: `Checklist and schedule for audit "${audit.title}" have been shared with you. Please review before the audit.`,
+      message: `Checklist and schedule for audit "${audit.title}" have been shared with you.${docSentence} Please review before the audit.`,
       link: `/audits/${params.id}`,
       auditId: params.id,
     }))
@@ -108,10 +117,14 @@ export async function POST(
       }
     }
 
-    const { error: updateError } = await supabase
-      .from('Audit')
-      .update({ checklistScheduleSentAt: new Date().toISOString() })
-      .eq('id', params.id)
+    const auditUpdate: Record<string, unknown> = {
+      checklistScheduleSentAt: new Date().toISOString(),
+    }
+    if (isExternalType) {
+      auditUpdate.documentationRequestedAt = new Date().toISOString()
+    }
+
+    const { error: updateError } = await supabase.from('Audit').update(auditUpdate).eq('id', params.id)
     if (updateError) {
       console.error('Error setting checklistScheduleSentAt:', updateError)
       return NextResponse.json(

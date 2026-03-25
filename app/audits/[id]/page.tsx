@@ -191,7 +191,7 @@ const AuditDetailPage = () => {
       if (res.ok) {
         const data = await res.json()
         setAudit(data)
-        setUploadedFiles(data.documents || [])
+        setUploadedFiles(data.documents || data.Documents || [])
         if (data.checklistId && data.Checklist) {
           setSelectedChecklist({
             ...data.Checklist,
@@ -341,6 +341,7 @@ const AuditDetailPage = () => {
           fileUrl: file.fileUrl,
           fileType: file.fileType,
           fileSize: file.fileSize,
+          documentKind: file.documentKind ?? 'GENERAL',
         }),
       })
 
@@ -504,6 +505,16 @@ const AuditDetailPage = () => {
   const canEditAuditValue =
     me &&
     canEditAudit(me.roles, me.id, auditorUserIds, auditeeUserIds)
+  const roleList = me?.roles ?? []
+  const isFocalPerson = roleList.includes('FOCAL_PERSON')
+  const isQualityManager = roleList.includes('QUALITY_MANAGER')
+  const isAuditor = roleList.includes('AUDITOR')
+  const isExternalAuditType = audit.type === 'EXTERNAL' || audit.type === 'THIRD_PARTY'
+  const focalPreAuditDocs = uploadedFiles.filter((d: { documentKind?: string }) => d.documentKind === 'FOCAL_PRE_AUDIT')
+  const generalDocs = uploadedFiles.filter((d: { documentKind?: string }) => d.documentKind !== 'FOCAL_PRE_AUDIT')
+  const canUploadFocalPreAuditDocs =
+    isFocalPerson && isExternalAuditType && audit.status !== 'CLOSED' && auditeeUserIds.includes(me?.id ?? '')
+  const canViewFocalPreAuditDocs = isQualityManager || isAuditor || canUploadFocalPreAuditDocs
   const canMutateAuditPreparation =
     !!canEditAuditValue &&
     audit.status !== 'COMPLETED' &&
@@ -728,6 +739,65 @@ const AuditDetailPage = () => {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Audit documents</CardTitle>
+                {isExternalAuditType && (
+                  <CardDescription>
+                    External / third-party audit: focal persons can upload requested pre-audit documentation for auditor
+                    review.
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {generalDocs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">General documents</p>
+                    <FileList
+                      files={generalDocs.map((f: any) => ({
+                        fileUrl: f.fileUrl,
+                        fileName: f.name,
+                        fileSize: f.fileSize,
+                        fileType: f.fileType,
+                      }))}
+                      showDownload
+                      showUrl={false}
+                    />
+                  </div>
+                )}
+
+                {canViewFocalPreAuditDocs && focalPreAuditDocs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Pre-audit documentation (focal upload)</p>
+                    <FileList
+                      files={focalPreAuditDocs.map((f: any) => ({
+                        fileUrl: f.fileUrl,
+                        fileName: f.name,
+                        fileSize: f.fileSize,
+                        fileType: f.fileType,
+                      }))}
+                      showDownload
+                      showUrl={false}
+                    />
+                  </div>
+                )}
+
+                {canUploadFocalPreAuditDocs && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Upload pre-audit documentation</p>
+                    <FileUpload
+                      entityType="audit"
+                      entityId={params.id as string}
+                      onUploadComplete={(file) => {
+                        void handleFileUpload({ ...file, documentKind: 'FOCAL_PRE_AUDIT' })
+                      }}
+                      onUploadError={(e) => alert(e)}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {!isERP && (

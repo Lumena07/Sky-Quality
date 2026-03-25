@@ -82,9 +82,39 @@ export async function GET() {
       // Table may not exist yet
     }
 
+    let pendingCapApprovals: Array<{
+      id: string
+      findingId: string
+      dueDate: string
+      capStatus: string | null
+      amCapStatus: string | null
+      Finding?: Array<{ findingNumber: string; status: string; capDueDate: string | null }> | { findingNumber: string; status: string; capDueDate: string | null }
+    }> = []
+    try {
+      const { data: capData } = await supabase
+        .from('CorrectiveAction')
+        .select(
+          `
+          id,
+          findingId,
+          dueDate,
+          capStatus,
+          amCapStatus,
+          Finding:findingId(findingNumber, status, capDueDate)
+        `
+        )
+        .eq('amCapStatus', 'PENDING')
+        .order('updatedAt', { ascending: false })
+        .limit(50)
+      pendingCapApprovals = (capData ?? []) as typeof pendingCapApprovals
+    } catch {
+      // Column/table may not exist yet
+    }
+
     return NextResponse.json({
       escalations,
       pendingRescheduleRequests,
+      pendingCapApprovals,
     })
   } catch (error) {
     console.error('Error fetching AM dashboard:', error)

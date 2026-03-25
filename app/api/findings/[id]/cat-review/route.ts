@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
+import { capRequiresAccountableManager } from '@/lib/cap-resources'
 
 /** Approve or reject Corrective Action Taken (CAT). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -60,7 +61,7 @@ export async function PATCH(
 
     const { data: ca, error: fetchError } = await supabase
       .from('CorrectiveAction')
-      .select('id, capStatus')
+      .select('id, capStatus, capResourceTypes, amCapStatus')
       .eq('findingId', findingId)
       .single()
 
@@ -92,6 +93,22 @@ export async function PATCH(
           { error: `Root cause and CAP must be set and approved before closing. Missing: ${reasons.join('; ')}.` },
           { status: 400 }
         )
+      }
+
+      const caFull = ca as {
+        capResourceTypes?: string[] | null
+        amCapStatus?: string | null
+      }
+      if (capRequiresAccountableManager(caFull.capResourceTypes ?? null)) {
+        if (caFull.amCapStatus !== 'APPROVED') {
+          return NextResponse.json(
+            {
+              error:
+                'Accountable Manager must approve this CAP (resources required) before Corrective Action Taken can be accepted.',
+            },
+            { status: 400 }
+          )
+        }
       }
     }
 

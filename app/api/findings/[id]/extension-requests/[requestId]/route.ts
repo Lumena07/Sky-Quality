@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
-import { getCurrentUserProfile, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
+import { getCurrentUserProfile, isQualityManager } from '@/lib/permissions'
 
 export async function PATCH(
   request: Request,
@@ -21,29 +21,6 @@ export async function PATCH(
     }
 
     const { roles } = await getCurrentUserProfile(supabase, user.id)
-    if (!canReviewFinding(roles)) {
-      return NextResponse.json(
-        { error: 'Only reviewers can approve or reject extension requests' },
-        { status: 403 }
-      )
-    }
-
-    const { data: findingRow, error: findingErr } = await supabase
-      .from('Finding')
-      .select('auditId')
-      .eq('id', findingId)
-      .single()
-    if (findingErr || !findingRow) {
-      return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
-    }
-    const auditId = (findingRow as { auditId: string }).auditId
-    const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
-    if (!canReview) {
-      return NextResponse.json(
-        { error: 'Only auditors assigned to this audit or Quality Manager can approve or reject extension requests' },
-        { status: 403 }
-      )
-    }
 
     const body = await request.json()
     const { status, reviewNotes } = body
@@ -72,6 +49,39 @@ export async function PATCH(
     if ((extRequest as { status: string }).status !== 'PENDING') {
       return NextResponse.json(
         { error: 'Extension request has already been reviewed' },
+        { status: 400 }
+      )
+    }
+
+    const reqRow = extRequest as {
+      requestedCapDueDate: string | null
+      requestedCloseOutDueDate: string | null
+    }
+    const involvesCapPart = Boolean(reqRow.requestedCapDueDate)
+    const involvesCatPart = Boolean(reqRow.requestedCloseOutDueDate)
+
+    if (!involvesCapPart && !involvesCatPart) {
+      return NextResponse.json(
+        { error: 'Extension request has no requested dates to review' },
+        { status: 400 }
+      )
+    }
+
+    if (!isQualityManager(roles)) {
+      return NextResponse.json(
+        {
+          error:
+            'Only a Quality Manager can approve or reject CAT extension requests',
+        },
+        { status: 403 }
+      )
+    }
+    if (involvesCapPart) {
+      return NextResponse.json(
+        {
+          error:
+            'This endpoint reviews CAT extension requests only. CAP due-date changes are handled in CAP flows.',
+        },
         { status: 400 }
       )
     }
@@ -121,14 +131,17 @@ export async function PATCH(
           .select('id')
           .eq('findingId', findingId)
           .single()
-        if (ca && req.requestedCapDueDate) {
-          await supabase
-            .from('CorrectiveAction')
-            .update({
-              dueDate: new Date(req.requestedCapDueDate + 'T23:59:59Z').toISOString(),
-              updatedAt: now,
-            })
-            .eq('findingId', findingId)
+        if (ca) {
+          const caUpdates: Record<string, unknown> = { updatedAt: now }
+          if (req.requestedCapDueDate) {
+            caUpdates.dueDate = new Date(req.requestedCapDueDate + 'T23:59:59Z').toISOString()
+          }
+          if (req.requestedCloseOutDueDate) {
+            caUpdates.catDueDate = new Date(req.requestedCloseOutDueDate + 'T23:59:59Z').toISOString()
+          }
+          if (Object.keys(caUpdates).length > 1) {
+            await supabase.from('CorrectiveAction').update(caUpdates).eq('findingId', findingId)
+          }
         }
       }
 

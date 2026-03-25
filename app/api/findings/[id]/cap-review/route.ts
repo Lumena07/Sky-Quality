@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
+import { capRequiresAccountableManager } from '@/lib/cap-resources'
 
 /** Approve or reject Corrective Action Plan (CAP). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -60,7 +61,7 @@ export async function PATCH(
 
     const { data: ca, error: fetchError } = await supabase
       .from('CorrectiveAction')
-      .select('id')
+      .select('id, capResourceTypes')
       .eq('findingId', findingId)
       .single()
 
@@ -71,17 +72,35 @@ export async function PATCH(
       )
     }
 
+    const resourceTypes = (ca as { capResourceTypes?: string[] | null }).capResourceTypes ?? []
+    const needsAm = approved && capRequiresAccountableManager(resourceTypes)
+
     const now = new Date().toISOString()
     const status = approved ? 'APPROVED' : 'REJECTED'
+    const updatePayload: Record<string, unknown> = {
+      capStatus: status,
+      capReviewedById: user.id,
+      capReviewedAt: now,
+      capRejectionReason: approved ? null : rejectionReason,
+      updatedAt: now,
+    }
+    if (approved && needsAm) {
+      updatePayload.amCapStatus = 'PENDING'
+    } else if (approved && !needsAm) {
+      updatePayload.amCapStatus = 'NOT_REQUIRED'
+      updatePayload.amCapReviewedById = null
+      updatePayload.amCapReviewedAt = null
+      updatePayload.amCapRejectionReason = null
+    } else if (!approved) {
+      updatePayload.amCapStatus = 'NOT_REQUIRED'
+      updatePayload.amCapReviewedById = null
+      updatePayload.amCapReviewedAt = null
+      updatePayload.amCapRejectionReason = null
+    }
+
     const { data: updated, error } = await supabase
       .from('CorrectiveAction')
-      .update({
-        capStatus: status,
-        capReviewedById: user.id,
-        capReviewedAt: now,
-        capRejectionReason: approved ? null : rejectionReason,
-        updatedAt: now,
-      })
+      .update(updatePayload)
       .eq('id', ca.id)
       .select('*')
       .single()
@@ -103,12 +122,15 @@ export async function PATCH(
     const findingNumber = (findingForNotify as { findingNumber?: string })?.findingNumber ?? findingId
     if (assignedToId) {
       if (approved) {
+        const message = needsAm
+          ? `Your Corrective Action Plan for finding ${findingNumber} was approved by Quality. It is pending Accountable Manager approval (resources) before you can enter Corrective Action Taken.`
+          : `Your Corrective Action Plan for finding ${findingNumber} has been approved. You can now enter Corrective Action Taken and upload evidence.`
         await supabase.from('Notification').insert({
           id: randomUUID(),
           userId: assignedToId,
           type: 'SYSTEM_ALERT',
           title: 'Corrective Action Plan approved',
-          message: `Your Corrective Action Plan for finding ${findingNumber} has been approved. You can now enter Corrective Action Taken and upload evidence.`,
+          message,
           link: `/findings/${findingId}`,
           findingId,
         })
@@ -119,6 +141,27 @@ export async function PATCH(
           type: 'SYSTEM_ALERT',
           title: 'Corrective Action Plan rejected',
           message: `Your Corrective Action Plan for finding ${findingNumber} has been rejected. Please review the feedback and resubmit.`,
+          link: `/findings/${findingId}`,
+          findingId,
+        })
+      }
+    }
+
+    if (needsAm) {
+      const { data: amUsers } = await supabase
+        .from('User')
+        .select('id')
+        .eq('isActive', true)
+        .contains('roles', ['ACCOUNTABLE_MANAGER'])
+      for (const row of amUsers ?? []) {
+        const amId = (row as { id: string }).id
+        if (!amId) continue
+        await supabase.from('Notification').insert({
+          id: randomUUID(),
+          userId: amId,
+          type: 'SYSTEM_ALERT',
+          title: 'CAP pending Accountable Manager approval',
+          message: `Finding ${findingNumber}: Corrective Action Plan was approved by Quality and requires your approval (resources).`,
           link: `/findings/${findingId}`,
           findingId,
         })
