@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserProfile, isNormalUser, canSeeTraining, canAddTraining, canSeeAmDashboard } from '@/lib/permissions'
 
-/** GET: List training records. Normal users see only their own; reviewers/AM see all (optional filter by userId). */
+/** GET: List training records. Normal users see only their own; reviewers see all (optional filter by userId). */
 export async function GET(request: Request) {
   try {
     const supabase = createSupabaseServerClient()
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { error: 'Training is only available to Quality department members and Quality Manager.' },
         { status: 403 }
       )
     }
@@ -63,7 +63,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** POST: Create training record. Only reviewers or Accountable Manager. */
+/** POST: Create training record. Only reviewers (Quality Manager or Auditor). */
 export async function POST(request: Request) {
   try {
     const supabase = createSupabaseServerClient()
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { error: 'Training is only available to Quality department members and Quality Manager.' },
         { status: 403 }
       )
     }

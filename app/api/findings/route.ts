@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { generateFindingNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
-import { calculateDeadlines } from '@/lib/audit-deadlines'
+import { calculateDeadlines, isObservationPriority } from '@/lib/audit-deadlines'
 import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard } from '@/lib/permissions'
 import { evaluateOverdue } from '@/lib/finding-overdue'
 
@@ -76,6 +76,7 @@ export async function GET(request: Request) {
         const ca = correctiveAction ?? (f.correctiveAction as Record<string, unknown> | null | undefined)
         const overdueEval = evaluateOverdue(
           {
+            findingPriority: f.priority as string | null | undefined,
             findingStatus: f.status as string | null | undefined,
             findingDueDate: f.dueDate as string | null | undefined,
             findingCapDueDate: f.capDueDate as string | null | undefined,
@@ -96,6 +97,7 @@ export async function GET(request: Request) {
       const now = new Date().toISOString()
       result = result.filter((f: Record<string, unknown>) => {
         if (f.status === 'CLOSED') return false
+        if (isObservationPriority(f.priority as string | null | undefined)) return false
         const rootCause = f.rootCause as string | null | undefined
         const capDueDate = f.capDueDate as string | null | undefined
         const dueDate = f.dueDate as string | null | undefined
@@ -180,9 +182,13 @@ export async function POST(request: Request) {
     let capDueDate: string | null = null
     let closeOutDueDate: string | null = null
     const auditReportDate = audit.updatedAt || audit.createdAt
+    const priorityNorm = priority ? String(priority).toUpperCase() : ''
 
-    if (priority) {
-      const deadlines = calculateDeadlines(auditReportDate, priority as 'P1' | 'P2' | 'P3')
+    if (priorityNorm && isObservationPriority(priorityNorm)) {
+      capDueDate = null
+      closeOutDueDate = null
+    } else if (priorityNorm && ['P1', 'P2', 'P3'].includes(priorityNorm)) {
+      const deadlines = calculateDeadlines(auditReportDate, priorityNorm as 'P1' | 'P2' | 'P3')
       capDueDate = deadlines.capDueDate.toISOString()
       closeOutDueDate = deadlines.closeOutDueDate.toISOString()
     }
@@ -203,12 +209,24 @@ export async function POST(request: Request) {
         departmentId,
         policyReference,
         description,
-        rootCause,
-        severity,
-        priority: priority || null,
+        rootCause: isObservationPriority(priorityNorm) ? null : rootCause,
+        severity: isObservationPriority(priorityNorm)
+          ? 'Observation'
+          : priorityNorm === 'P1'
+            ? 'Critical'
+            : priorityNorm === 'P2'
+              ? 'Major'
+              : priorityNorm === 'P3'
+                ? 'Minor'
+                : severity,
+        priority: priorityNorm || priority || null,
         checklistItemId: checklistItemId || null,
         assignedToId,
-        dueDate: dueDate ? new Date(dueDate).toISOString() : null,
+        dueDate: isObservationPriority(priorityNorm)
+          ? null
+          : dueDate
+            ? new Date(dueDate).toISOString()
+            : null,
         capDueDate,
         closeOutDueDate,
         status: 'OPEN',
@@ -226,7 +244,7 @@ export async function POST(request: Request) {
       )
     }
 
-    if (actionPlan) {
+    if (actionPlan && !isObservationPriority(priorityNorm)) {
       const { data: correctiveAction, error: caError } = await supabase
         .from('CorrectiveAction')
         .insert({

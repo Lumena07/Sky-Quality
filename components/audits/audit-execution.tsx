@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { getPriorityDescription } from '@/lib/audit-deadlines'
+import { getPriorityDescription, type Priority } from '@/lib/audit-deadlines'
 
 interface ChecklistItem {
   id: string
@@ -933,7 +933,7 @@ const NonCompliantForm = ({
   const [formData, setFormData] = useState(() => ({
     departmentId: finding?.departmentId ?? '',
     description: finding?.description ?? checklistItem.auditQuestion ?? '',
-    priority: (finding?.priority as 'P1' | 'P2' | 'P3') ?? 'P2',
+    priority: (finding?.priority as Priority) ?? 'P2',
     assignedToId: finding?.assignedToId ?? '',
     classificationId: finding?.classificationId ?? '',
     selectedGroup: '',
@@ -1125,7 +1125,7 @@ const NonCompliantForm = ({
           <Label htmlFor="priority">Priority *</Label>
           <Select
             value={formData.priority}
-            onValueChange={(value) => setFormData({ ...formData, priority: value as 'P1' | 'P2' | 'P3' })}
+            onValueChange={(value) => setFormData({ ...formData, priority: value as Priority })}
             disabled={saving}
           >
             <SelectTrigger id="priority" disabled={saving} className={cn(saving && 'cursor-not-allowed opacity-70')}>
@@ -1134,7 +1134,8 @@ const NonCompliantForm = ({
             <SelectContent>
               <SelectItem value="P1">P1 - Critical (24h CAP, 7d Close Out)</SelectItem>
               <SelectItem value="P2">P2 - Major (2w CAP, 60d Close Out)</SelectItem>
-              <SelectItem value="P3">P3 - Observation (4w CAP, 90d Close Out)</SelectItem>
+              <SelectItem value="P3">P3 - Minor (4w CAP, 90d Close Out)</SelectItem>
+              <SelectItem value="OBSERVATION">Observation (no CAP/CAT/root-cause due dates)</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">

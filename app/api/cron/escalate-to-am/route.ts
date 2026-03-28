@@ -8,6 +8,33 @@ const ESCALATION_CAP_OVERDUE_DAYS = parseInt(
   10
 )
 
+const HOURS_24_MS = 24 * 60 * 60 * 1000
+
+const getCorrectiveActionRow = (f: { CorrectiveAction?: unknown }) => {
+  const raw = f.CorrectiveAction
+  if (Array.isArray(raw)) return raw[0] ?? null
+  return raw ?? null
+}
+
+const isCapNotEntered = (ca: unknown): boolean => {
+  if (!ca || typeof ca !== 'object') return true
+  const entered = (ca as { capEnteredAt?: string | null }).capEnteredAt
+  return entered == null || String(entered).trim() === ''
+}
+
+const p1EscalationThresholdPassed = (f: {
+  createdAt?: string
+  capDueDate?: string | null
+}): boolean => {
+  const capDue = f.capDueDate ? new Date(f.capDueDate).getTime() : NaN
+  if (!Number.isNaN(capDue)) {
+    return Date.now() >= capDue
+  }
+  const created = f.createdAt ? new Date(f.createdAt).getTime() : NaN
+  if (Number.isNaN(created)) return false
+  return Date.now() >= created + HOURS_24_MS
+}
+
 /**
  * Called by cron to escalate findings to Accountable Manager.
  * Secure with CRON_SECRET: Authorization: Bearer <CRON_SECRET>.
@@ -48,13 +75,16 @@ export async function GET(request: Request) {
         findingNumber,
         priority,
         status,
+        createdAt,
+        capDueDate,
         CorrectiveAction(
           id,
           dueDate,
           status,
           catDueDate,
           catStatus,
-          completionDate
+          completionDate,
+          capEnteredAt
         )
       `
       )
@@ -76,17 +106,30 @@ export async function GET(request: Request) {
       (existingEscalations ?? []).map((e: { findingId: string }) => e.findingId)
     )
 
-    const toEscalate: Array<{ findingId: string; findingNumber: string }> = []
+    const toEscalate: Array<{ findingId: string; findingNumber: string; trigger: string }> = []
     for (const f of openFindingsWithCa) {
       if (escalatedFindingIds.has(f.id)) continue
-      const ca = Array.isArray(f.CorrectiveAction) ? f.CorrectiveAction[0] : f.CorrectiveAction
+      if (String((f as { priority?: string | null }).priority ?? '').toUpperCase() === 'OBSERVATION') {
+        continue
+      }
+      const ca = getCorrectiveActionRow(f)
 
       const findingPriority = (f as { priority?: string | null }).priority ?? null
       if (findingPriority === 'P1') {
-        toEscalate.push({
-          findingId: f.id,
-          findingNumber: (f as { findingNumber?: string }).findingNumber ?? f.id,
-        })
+        const row = f as { createdAt?: string; capDueDate?: string | null }
+        if (
+          isCapNotEntered(ca) &&
+          p1EscalationThresholdPassed({
+            createdAt: row.createdAt,
+            capDueDate: row.capDueDate ?? null,
+          })
+        ) {
+          toEscalate.push({
+            findingId: f.id,
+            findingNumber: (f as { findingNumber?: string }).findingNumber ?? f.id,
+            trigger: 'P1',
+          })
+        }
         continue
       }
 
@@ -95,6 +138,7 @@ export async function GET(request: Request) {
         toEscalate.push({
           findingId: f.id,
           findingNumber: (f as { findingNumber?: string }).findingNumber ?? f.id,
+          trigger: 'OVERDUE_CAP',
         })
         continue
       }
@@ -107,6 +151,7 @@ export async function GET(request: Request) {
         toEscalate.push({
           findingId: f.id,
           findingNumber: (f as { findingNumber?: string }).findingNumber ?? f.id,
+          trigger: 'CAT_OVERDUE',
         })
         continue
       }
@@ -131,29 +176,7 @@ export async function GET(request: Request) {
 
     const now = new Date().toISOString()
     const firstAmId = (amUsers[0] as { id: string }).id
-    for (const { findingId, findingNumber } of toEscalate) {
-      const finding = openFindingsWithCa.find((f) => f.id === findingId)
-      const ca = finding
-        ? Array.isArray(finding.CorrectiveAction)
-          ? finding.CorrectiveAction[0]
-          : finding.CorrectiveAction
-        : null
-      const findingPriority = finding ? ((finding as { priority?: string | null }).priority ?? null) : null
-      const capDueDate = ca?.dueDate ? (ca as { dueDate: string }).dueDate : null
-      const catDueDate = ca?.catDueDate ? (ca as { catDueDate: string }).catDueDate : null
-      const catStatus = (ca as { catStatus?: string | null } | null)?.catStatus ?? null
-      const completionDate = (ca as { completionDate?: string | null } | null)?.completionDate ?? null
-      const catCompleted = catStatus === 'APPROVED' || Boolean(completionDate)
-
-      const trigger =
-        findingPriority === 'P1'
-          ? 'P1'
-          : capDueDate && capDueDate < cutoffIso
-            ? 'OVERDUE_CAP'
-            : catDueDate && catDueDate < cutoffIso && !catCompleted
-              ? 'CAT_OVERDUE'
-              : 'OVERDUE_CAP'
-
+    for (const { findingId, findingNumber, trigger } of toEscalate) {
       escalationRows.push({
         id: randomUUID(),
         findingId,
@@ -170,7 +193,7 @@ export async function GET(request: Request) {
           title: 'Finding escalated to Accountable Manager',
           message:
             trigger === 'P1'
-              ? `Finding ${findingNumber} has been escalated (Priority 1).`
+              ? `Finding ${findingNumber} has been escalated (Priority 1: CAP not entered after the required time).`
               : trigger === 'CAT_OVERDUE'
                 ? `Finding ${findingNumber} has been escalated (CAT overdue > ${ESCALATION_CAP_OVERDUE_DAYS} days).`
                 : `Finding ${findingNumber} has been escalated (CAP overdue > ${ESCALATION_CAP_OVERDUE_DAYS} days).`,

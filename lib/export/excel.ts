@@ -8,6 +8,7 @@ export interface FindingExportData {
   description: string
   rootCause?: string
   severity: string
+  priority?: string
   status: string
   assignedTo: string
   dueDate?: string
@@ -45,6 +46,7 @@ export const exportFindingsToExcel = (
     'Description': finding.description,
     'Root Cause': finding.rootCause || '',
     'Severity': finding.severity,
+    'Priority': finding.priority || '',
     'Status': finding.status,
     'Assigned To': finding.assignedTo,
     'Due Date': finding.dueDate || '',
@@ -65,6 +67,7 @@ export const exportFindingsToExcel = (
     { wch: 40 }, // Description
     { wch: 30 }, // Root Cause
     { wch: 12 }, // Severity
+    { wch: 12 }, // Priority
     { wch: 15 }, // Status
     { wch: 20 }, // Assigned To
     { wch: 12 }, // Due Date
@@ -151,4 +154,15 @@ export const exportDashboardStatsToExcel = (stats: {
 
   const fileName = `Dashboard-Stats-${Date.now()}.xlsx`
   XLSX.writeFile(wb, fileName)
+}
+
+export const exportTrainingComplianceMatrixToExcel = (
+  rows: Record<string, string | number>[],
+  filename?: string
+) => {
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = Object.keys(rows[0] ?? {}).map(() => ({ wch: 18 }))
+  XLSX.utils.book_append_sheet(wb, ws, 'Compliance')
+  XLSX.writeFile(wb, filename || `Training-Compliance-${Date.now()}.xlsx`)
 }

@@ -10,11 +10,26 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Users, Building2, Settings, Building, Pencil, Search, BarChart3, Tags, AlertTriangle } from 'lucide-react'
+import {
+  Users,
+  Building2,
+  Settings,
+  Building,
+  Pencil,
+  Search,
+  BarChart3,
+  Tags,
+  AlertTriangle,
+  Contact,
+} from 'lucide-react'
 import { isAdminOrQM } from '@/lib/permissions'
+import type { RoleAssignmentOption } from '@/lib/department-role-catalog'
+import type { PilotSeat } from '@/lib/role-metadata'
+import { UserRoleFields } from '@/components/admin/user-role-fields'
 import { KpiManagementContent } from '@/components/admin/kpi-management-content'
 import { FindingClassificationsContent } from '@/components/admin/finding-classifications-content'
 import { RegulatoryViolationsContent } from '@/components/admin/regulatory-violations-content'
+import { DepartmentRoleCatalogContent } from '@/components/admin/department-role-catalog-content'
 import {
   Dialog,
   DialogContent,
@@ -30,17 +45,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const USER_ROLES = [
-  'QUALITY_MANAGER',
-  'ACCOUNTABLE_MANAGER',
-  'AUDITOR',
-  'DEPARTMENT_HEAD',
-  'STAFF',
-  'FOCAL_PERSON',
-  'DIRECTOR_OF_SAFETY',
-  'SAFETY_OFFICER',
-] as const
-
 const SAFETY_OPERATIONAL_AREAS = [
   'airline_ops',
   'mro_maintenance',
@@ -48,8 +52,6 @@ const SAFETY_OPERATIONAL_AREAS = [
   'all',
   'other',
 ] as const
-
-type UserRole = (typeof USER_ROLES)[number]
 
 type DepartmentOption = {
   id: string
@@ -64,13 +66,63 @@ type UserWithDept = {
   email: string
   firstName: string
   lastName: string
-  role?: UserRole
+  role?: string
   roles?: string[]
   organizationId?: string | null
   safetyOperationalArea?: (typeof SAFETY_OPERATIONAL_AREAS)[number] | null
+  roleMetadata?: {
+    PILOT?: { pilotSeat?: string; aircraftTypeCodes?: string[] }
+    FLIGHT_DISPATCHERS?: { aircraftTypeCodes?: string[] }
+  } | null
   position: string | null
   isActive?: boolean
   Department: { id: string; name: string } | null
+}
+
+const parseUserRoleMetadataForm = (
+  rm: UserWithDept['roleMetadata']
+): {
+  pilotSeat: PilotSeat | ''
+  pilotAircraftTypes: string[]
+  dispatcherAircraftTypes: string[]
+} => {
+  if (!rm || typeof rm !== 'object') {
+    return { pilotSeat: '', pilotAircraftTypes: [], dispatcherAircraftTypes: [] }
+  }
+  const pilot = rm.PILOT
+  const disp = rm.FLIGHT_DISPATCHERS
+  const seat =
+    pilot?.pilotSeat === 'CAPTAIN' || pilot?.pilotSeat === 'FIRST_OFFICER'
+      ? pilot.pilotSeat
+      : ''
+  return {
+    pilotSeat: seat,
+    pilotAircraftTypes: Array.isArray(pilot?.aircraftTypeCodes)
+      ? pilot.aircraftTypeCodes.filter((x): x is string => typeof x === 'string')
+      : [],
+    dispatcherAircraftTypes: Array.isArray(disp?.aircraftTypeCodes)
+      ? disp.aircraftTypeCodes.filter((x): x is string => typeof x === 'string')
+      : [],
+  }
+}
+
+const buildRoleMetadataPayload = (
+  roles: string[],
+  pilotSeat: PilotSeat | '',
+  pilotAircraftTypes: string[],
+  dispatcherAircraftTypes: string[]
+): Record<string, unknown> | undefined => {
+  const o: Record<string, unknown> = {}
+  if (roles.includes('PILOT')) {
+    o.PILOT = {
+      pilotSeat,
+      aircraftTypeCodes: pilotAircraftTypes,
+    }
+  }
+  if (roles.includes('FLIGHT_DISPATCHERS')) {
+    o.FLIGHT_DISPATCHERS = { aircraftTypeCodes: dispatcherAircraftTypes }
+  }
+  return Object.keys(o).length > 0 ? o : undefined
 }
 
 const getUserRoles = (u: UserWithDept): string[] =>
@@ -91,6 +143,7 @@ const AdminPage = () => {
   const [roles, setRoles] = useState<string[]>([])
   const [users, setUsers] = useState<UserWithDept[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
+  const [roleAssignmentOptions, setRoleAssignmentOptions] = useState<RoleAssignmentOption[]>([])
 
   useEffect(() => {
     const check = async () => {
@@ -124,6 +177,9 @@ const AdminPage = () => {
   const [userForm, setUserForm] = useState({
     roles: [] as string[],
     safetyOperationalArea: '' as string,
+    pilotSeat: '' as PilotSeat | '',
+    pilotAircraftTypes: [] as string[],
+    dispatcherAircraftTypes: [] as string[],
     departmentId: '',
     isActive: true,
     position: '',
@@ -136,6 +192,9 @@ const AdminPage = () => {
     lastName: '',
     roles: ['STAFF'] as string[],
     safetyOperationalArea: '' as string,
+    pilotSeat: '' as PilotSeat | '',
+    pilotAircraftTypes: [] as string[],
+    dispatcherAircraftTypes: [] as string[],
     departmentId: '',
     position: '',
     phone: '',
@@ -237,6 +296,29 @@ const AdminPage = () => {
     fetchOrganizations()
   }, [])
 
+  useEffect(() => {
+    if (!adminAllowed) return
+    const loadRoleOptions = async () => {
+      try {
+        const res = await fetch('/api/department-role-catalog/assignment-options', {
+          credentials: 'same-origin',
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setRoleAssignmentOptions(Array.isArray(data) ? data : [])
+        }
+      } catch (e) {
+        console.error('Failed to load role catalog options:', e)
+      }
+    }
+    loadRoleOptions()
+  }, [adminAllowed])
+
+  const roleFilterCodes = useMemo(() => {
+    const raw = roleAssignmentOptions.map((o) => o.roleCode)
+    return raw.filter((code, index) => raw.indexOf(code) === index).sort()
+  }, [roleAssignmentOptions])
+
   const filteredUsers = useMemo(() => {
     let list = users
     const q = userSearch.trim().toLowerCase()
@@ -250,7 +332,7 @@ const AdminPage = () => {
       )
     }
     if (userRoleFilter !== 'all') {
-      list = list.filter((u) => u.role === userRoleFilter)
+      list = list.filter((u) => getUserRoles(u).includes(userRoleFilter))
     }
     if (userDeptFilter !== 'all') {
       list = list.filter(
@@ -261,13 +343,19 @@ const AdminPage = () => {
   }, [users, userSearch, userRoleFilter, userDeptFilter])
 
   const handleOpenAddUser = () => {
+    const staff = roleAssignmentOptions.find((o) => o.roleCode === 'STAFF')
+    const first = roleAssignmentOptions[0]
+    const initialRoles = staff ? ['STAFF'] : first ? [first.roleCode] : []
     setAddUserForm({
       email: '',
       password: '',
       firstName: '',
       lastName: '',
-      roles: ['STAFF'],
+      roles: initialRoles,
       safetyOperationalArea: '',
+      pilotSeat: '',
+      pilotAircraftTypes: [],
+      dispatcherAircraftTypes: [],
       departmentId: '',
       position: '',
       phone: '',
@@ -286,10 +374,39 @@ const AdminPage = () => {
       addUserForm.roles.length === 0
     )
       return
+    if (roleAssignmentOptions.length === 0) {
+      alert(
+        'No roles are available from the department role catalog. A Quality Manager must add catalog entries under Admin → Department roles.'
+      )
+      return
+    }
     if (addUserForm.roles.includes('SAFETY_OFFICER') && !addUserForm.safetyOperationalArea) {
       alert('Safety operational area is required for Safety Officer role')
       return
     }
+    if (addUserForm.roles.includes('PILOT')) {
+      if (!addUserForm.pilotSeat) {
+        alert('Captain or First Officer is required for Pilot role')
+        return
+      }
+      if (addUserForm.pilotAircraftTypes.length === 0) {
+        alert('Select at least one aircraft type for Pilot role')
+        return
+      }
+    }
+    if (
+      addUserForm.roles.includes('FLIGHT_DISPATCHERS') &&
+      addUserForm.dispatcherAircraftTypes.length === 0
+    ) {
+      alert('Select at least one aircraft type for Flight dispatcher role')
+      return
+    }
+    const addRoleMeta = buildRoleMetadataPayload(
+      addUserForm.roles,
+      addUserForm.pilotSeat,
+      addUserForm.pilotAircraftTypes,
+      addUserForm.dispatcherAircraftTypes
+    )
     setAddUserSubmitting(true)
     try {
       const res = await fetch('/api/users', {
@@ -302,6 +419,7 @@ const AdminPage = () => {
           lastName: addUserForm.lastName.trim(),
           roles: addUserForm.roles,
           safetyOperationalArea: addUserForm.safetyOperationalArea || undefined,
+          ...(addRoleMeta ? { roleMetadata: addRoleMeta } : {}),
           departmentId: addUserForm.departmentId || undefined,
           position: addUserForm.position.trim() || undefined,
           phone: addUserForm.phone.trim() || undefined,
@@ -324,9 +442,18 @@ const AdminPage = () => {
 
   const handleOpenEditUser = (user: UserWithDept) => {
     setEditingUser(user)
+    const allowedCodes = new Set(roleAssignmentOptions.map((o) => o.roleCode))
+    const fromUser = getUserRoles(user).filter((r) => allowedCodes.has(r))
+    const fallback =
+      roleAssignmentOptions.find((o) => o.roleCode === 'STAFF')?.roleCode ??
+      roleAssignmentOptions[0]?.roleCode
+    const meta = parseUserRoleMetadataForm(user.roleMetadata)
     setUserForm({
-      roles: getUserRoles(user),
+      roles: fromUser.length > 0 ? fromUser : fallback ? [fallback] : [],
       safetyOperationalArea: user.safetyOperationalArea ?? '',
+      pilotSeat: meta.pilotSeat,
+      pilotAircraftTypes: meta.pilotAircraftTypes,
+      dispatcherAircraftTypes: meta.dispatcherAircraftTypes,
       departmentId: user.Department?.id ?? '',
       isActive: user.isActive !== false,
       position: user.position ?? '',
@@ -342,10 +469,39 @@ const AdminPage = () => {
       alert('Select at least one role')
       return
     }
+    if (roleAssignmentOptions.length === 0) {
+      alert(
+        'No roles are available from the department role catalog. A Quality Manager must add catalog entries under Admin → Department roles.'
+      )
+      return
+    }
     if (userForm.roles.includes('SAFETY_OFFICER') && !userForm.safetyOperationalArea) {
       alert('Safety operational area is required for Safety Officer role')
       return
     }
+    if (userForm.roles.includes('PILOT')) {
+      if (!userForm.pilotSeat) {
+        alert('Captain or First Officer is required for Pilot role')
+        return
+      }
+      if (userForm.pilotAircraftTypes.length === 0) {
+        alert('Select at least one aircraft type for Pilot role')
+        return
+      }
+    }
+    if (
+      userForm.roles.includes('FLIGHT_DISPATCHERS') &&
+      userForm.dispatcherAircraftTypes.length === 0
+    ) {
+      alert('Select at least one aircraft type for Flight dispatcher role')
+      return
+    }
+    const editRoleMeta = buildRoleMetadataPayload(
+      userForm.roles,
+      userForm.pilotSeat,
+      userForm.pilotAircraftTypes,
+      userForm.dispatcherAircraftTypes
+    )
     setUserSubmitting(true)
     try {
       const res = await fetch(`/api/users/${editingUser.id}`, {
@@ -354,6 +510,7 @@ const AdminPage = () => {
         body: JSON.stringify({
           roles: userForm.roles,
           safetyOperationalArea: userForm.safetyOperationalArea || null,
+          ...(editRoleMeta ? { roleMetadata: editRoleMeta } : {}),
           departmentId: userForm.departmentId || null,
           isActive: userForm.isActive,
           position: userForm.position || undefined,
@@ -610,6 +767,10 @@ const AdminPage = () => {
                   <AlertTriangle className="mr-2 h-4 w-4" />
                   Regulatory Violations
                 </TabsTrigger>
+                <TabsTrigger value="department-roles">
+                  <Contact className="mr-2 h-4 w-4" />
+                  Department roles
+                </TabsTrigger>
               </>
             )}
             <TabsTrigger value="settings">
@@ -659,7 +820,7 @@ const AdminPage = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All roles</SelectItem>
-                      {USER_ROLES.map((r) => (
+                      {roleFilterCodes.map((r) => (
                         <SelectItem key={r} value={r}>
                           {r.replace(/_/g, ' ')}
                         </SelectItem>
@@ -762,130 +923,119 @@ const AdminPage = () => {
             </Card>
 
             <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
-              <DialogContent aria-describedby="edit-user-desc">
-                <DialogHeader>
-                  <DialogTitle>Edit User</DialogTitle>
+              <DialogContent
+                aria-describedby="edit-user-desc"
+                className="flex max-h-[min(90vh,680px)] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+              >
+                <DialogHeader className="shrink-0 space-y-1 border-b px-6 py-4 text-left">
+                  <DialogTitle>Edit user</DialogTitle>
+                  {editingUser && (
+                    <p className="text-sm font-normal text-muted-foreground">
+                      {editingUser.firstName} {editingUser.lastName} · {editingUser.email}
+                    </p>
+                  )}
                 </DialogHeader>
                 <p id="edit-user-desc" className="sr-only">
-                  Update role, department, and status for this user
+                  Update organization, roles, and access for this user
                 </p>
                 {editingUser && (
-                  <form onSubmit={handleSaveUser} className="space-y-4 mt-4">
-                    <p className="text-sm text-muted-foreground">
-                      {editingUser.firstName} {editingUser.lastName} (
-                      {editingUser.email})
-                    </p>
-                    <div className="space-y-2">
-                      <Label>Roles (at least one)</Label>
-                      <div className="flex flex-wrap gap-3 pt-1" role="group" aria-label="User roles">
-                        {USER_ROLES.map((r) => (
-                          <label key={r} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <form
+                    onSubmit={handleSaveUser}
+                    className="flex min-h-0 flex-1 flex-col"
+                  >
+                    <Tabs defaultValue="organization" className="flex min-h-0 flex-1 flex-col">
+                      <TabsList
+                        className="mx-6 mt-4 grid h-9 w-full max-w-md shrink-0 grid-cols-2"
+                        aria-label="Edit user sections"
+                      >
+                        <TabsTrigger value="organization">Organization</TabsTrigger>
+                        <TabsTrigger value="roles">Roles &amp; access</TabsTrigger>
+                      </TabsList>
+                      <TabsContent
+                        value="organization"
+                        className="mt-0 min-h-[12rem] flex-1 overflow-y-auto px-6 py-4 data-[state=inactive]:hidden"
+                      >
+                        <div className="mx-auto max-w-xl space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="user-department">Department</Label>
+                            <Select
+                              value={userForm.departmentId || '__none__'}
+                              onValueChange={(v) =>
+                                setUserForm((p) => ({
+                                  ...p,
+                                  departmentId: v === '__none__' ? '' : v,
+                                }))
+                              }
+                            >
+                              <SelectTrigger id="user-department" aria-label="Department">
+                                <SelectValue placeholder="Select department" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">None</SelectItem>
+                                {departments.map((d) => (
+                                  <SelectItem key={d.id} value={d.id}>
+                                    {d.name} ({d.code})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="user-position">Position</Label>
+                            <Input
+                              id="user-position"
+                              value={userForm.position}
+                              onChange={(e) =>
+                                setUserForm((p) => ({ ...p, position: e.target.value }))
+                              }
+                              placeholder="Job title"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="user-phone">Phone</Label>
+                            <Input
+                              id="user-phone"
+                              type="tel"
+                              value={userForm.phone}
+                              onChange={(e) =>
+                                setUserForm((p) => ({ ...p, phone: e.target.value }))
+                              }
+                              placeholder="Phone number"
+                            />
+                          </div>
+                          <label className="flex cursor-pointer items-center gap-2 text-sm">
                             <input
                               type="checkbox"
-                              checked={userForm.roles.includes(r)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setUserForm((p) => ({ ...p, roles: [...p.roles, r] }))
-                                } else {
-                                  setUserForm((p) => ({
-                                    ...p,
-                                    roles: p.roles.filter((x) => x !== r),
-                                  }))
-                                }
-                              }}
+                              checked={userForm.isActive}
+                              onChange={(e) =>
+                                setUserForm((p) => ({
+                                  ...p,
+                                  isActive: e.target.checked,
+                                }))
+                              }
                               className="rounded border-input"
-                              aria-label={`Role ${r.replace(/_/g, ' ')}`}
+                              aria-label="User is active"
                             />
-                            {r.replace(/_/g, ' ')}
+                            Active account
                           </label>
-                        ))}
-                      </div>
-                    </div>
-                    {userForm.roles.includes('SAFETY_OFFICER') && (
-                      <div className="space-y-2">
-                        <Label htmlFor="user-safety-area">Safety operational area *</Label>
-                        <Select
-                          value={userForm.safetyOperationalArea || '__none__'}
-                          onValueChange={(v) =>
-                            setUserForm((p) => ({
-                              ...p,
-                              safetyOperationalArea: v === '__none__' ? '' : v,
-                            }))
-                          }
-                        >
-                          <SelectTrigger id="user-safety-area" aria-label="Safety operational area">
-                            <SelectValue placeholder="Select safety area" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Select area</SelectItem>
-                            {SAFETY_OPERATIONAL_AREAS.map((area) => (
-                              <SelectItem key={area} value={area}>
-                                {area.replace(/_/g, ' ')}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label htmlFor="user-department">Department</Label>
-                      <Select
-                        value={userForm.departmentId || '__none__'}
-                        onValueChange={(v) =>
-                          setUserForm((p) => ({ ...p, departmentId: v === '__none__' ? '' : v }))
-                        }
+                        </div>
+                      </TabsContent>
+                      <TabsContent
+                        value="roles"
+                        className="mt-0 min-h-[12rem] flex-1 overflow-y-auto px-6 py-4 data-[state=inactive]:hidden"
                       >
-                        <SelectTrigger id="user-department" aria-label="Department">
-                          <SelectValue placeholder="Select department" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">None</SelectItem>
-                          {departments.map((d) => (
-                            <SelectItem key={d.id} value={d.id}>
-                              {d.name} ({d.code})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="user-position">Position</Label>
-                      <Input
-                        id="user-position"
-                        value={userForm.position}
-                        onChange={(e) =>
-                          setUserForm((p) => ({ ...p, position: e.target.value }))
-                        }
-                        placeholder="Job title"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="user-phone">Phone</Label>
-                      <Input
-                        id="user-phone"
-                        value={userForm.phone}
-                        onChange={(e) =>
-                          setUserForm((p) => ({ ...p, phone: e.target.value }))
-                        }
-                        placeholder="Phone number"
-                      />
-                    </div>
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={userForm.isActive}
-                        onChange={(e) =>
-                          setUserForm((p) => ({
-                            ...p,
-                            isActive: e.target.checked,
-                          }))
-                        }
-                        className="rounded border-input"
-                        aria-label="User is active"
-                      />
-                      Active
-                    </label>
-                    <div className="flex justify-end gap-2 pt-2">
+                        <div className="mx-auto max-w-xl">
+                          <UserRoleFields
+                            form={userForm}
+                            setForm={setUserForm}
+                            roleAssignmentOptions={roleAssignmentOptions}
+                            safetyOperationalAreas={SAFETY_OPERATIONAL_AREAS}
+                            idPrefix="edit-user"
+                          />
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+                    <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/30 px-6 py-3">
                       <Button
                         type="button"
                         variant="outline"
@@ -903,178 +1053,195 @@ const AdminPage = () => {
             </Dialog>
 
             <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-              <DialogContent aria-describedby="add-user-desc">
-                <DialogHeader>
-                  <DialogTitle>Add User</DialogTitle>
+              <DialogContent
+                aria-describedby="add-user-desc"
+                className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+              >
+                <DialogHeader className="shrink-0 space-y-1 border-b px-5 py-4 text-left">
+                  <DialogTitle>Add user</DialogTitle>
+                  <p className="text-xs text-muted-foreground font-normal">
+                    Catalog roles: Admin → Department roles.
+                  </p>
                 </DialogHeader>
                 <p id="add-user-desc" className="sr-only">
                   Create a new user with email and temporary password
                 </p>
-                <form onSubmit={handleAddUser} className="space-y-4 mt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="add-user-email">Email *</Label>
-                    <Input
-                      id="add-user-email"
-                      type="email"
-                      value={addUserForm.email}
-                      onChange={(e) =>
-                        setAddUserForm((p) => ({ ...p, email: e.target.value }))
-                      }
-                      placeholder="user@example.com"
-                      required
-                      autoComplete="email"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="add-user-password">Temporary password *</Label>
-                    <Input
-                      id="add-user-password"
-                      type="password"
-                      value={addUserForm.password}
-                      onChange={(e) =>
-                        setAddUserForm((p) => ({ ...p, password: e.target.value }))
-                      }
-                      placeholder="Min. 6 characters"
-                      required
-                      minLength={6}
-                      autoComplete="new-password"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      User logs in with this; they can change it later from Change password.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="add-user-firstName">First name *</Label>
-                      <Input
-                        id="add-user-firstName"
-                        value={addUserForm.firstName}
-                        onChange={(e) =>
-                          setAddUserForm((p) => ({ ...p, firstName: e.target.value }))
-                        }
-                        placeholder="First name"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="add-user-lastName">Last name *</Label>
-                      <Input
-                        id="add-user-lastName"
-                        value={addUserForm.lastName}
-                        onChange={(e) =>
-                          setAddUserForm((p) => ({ ...p, lastName: e.target.value }))
-                        }
-                        placeholder="Last name"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Roles * (at least one)</Label>
-                    <div className="flex flex-wrap gap-3 pt-1" role="group" aria-label="User roles">
-                      {USER_ROLES.map((r) => (
-                        <label key={r} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={addUserForm.roles.includes(r)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setAddUserForm((p) => ({ ...p, roles: [...p.roles, r] }))
-                              } else {
+                <form
+                  onSubmit={handleAddUser}
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-3">
+                    <Tabs
+                      defaultValue="account"
+                      className="flex min-h-0 flex-1 flex-col"
+                    >
+                      <TabsList
+                        className="grid h-9 w-full max-w-md shrink-0 grid-cols-2"
+                        aria-label="Add user sections"
+                      >
+                        <TabsTrigger value="account">Account</TabsTrigger>
+                        <TabsTrigger value="roles">Roles &amp; access</TabsTrigger>
+                      </TabsList>
+                      <TabsContent
+                        value="account"
+                        className="mt-3 min-h-[10rem] flex-1 overflow-y-auto data-[state=inactive]:hidden"
+                      >
+                        <div className="grid grid-cols-1 gap-3 pb-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-3">
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="add-user-email" className="text-xs">
+                              Email *
+                            </Label>
+                            <Input
+                              id="add-user-email"
+                              type="email"
+                              value={addUserForm.email}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, email: e.target.value }))
+                              }
+                              placeholder="user@example.com"
+                              required
+                              autoComplete="email"
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="add-user-password" className="text-xs">
+                              Temporary password *
+                            </Label>
+                            <Input
+                              id="add-user-password"
+                              type="password"
+                              value={addUserForm.password}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, password: e.target.value }))
+                              }
+                              placeholder="Min. 6 characters"
+                              required
+                              minLength={6}
+                              autoComplete="new-password"
+                              className="h-9"
+                            />
+                            <p className="text-[11px] leading-snug text-muted-foreground">
+                              They can change this later under Change password.
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="add-user-firstName" className="text-xs">
+                              First name *
+                            </Label>
+                            <Input
+                              id="add-user-firstName"
+                              value={addUserForm.firstName}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, firstName: e.target.value }))
+                              }
+                              placeholder="First name"
+                              required
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="add-user-lastName" className="text-xs">
+                              Last name *
+                            </Label>
+                            <Input
+                              id="add-user-lastName"
+                              value={addUserForm.lastName}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, lastName: e.target.value }))
+                              }
+                              placeholder="Last name"
+                              required
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-1">
+                            <Label htmlFor="add-user-department" className="text-xs">
+                              Department
+                            </Label>
+                            <Select
+                              value={addUserForm.departmentId || '__none__'}
+                              onValueChange={(v) =>
                                 setAddUserForm((p) => ({
                                   ...p,
-                                  roles: p.roles.filter((x) => x !== r),
+                                  departmentId: v === '__none__' ? '' : v,
                                 }))
                               }
-                            }}
-                            className="rounded border-input"
-                            aria-label={`Role ${r.replace(/_/g, ' ')}`}
-                          />
-                          {r.replace(/_/g, ' ')}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  {addUserForm.roles.includes('SAFETY_OFFICER') && (
-                    <div className="space-y-2">
-                      <Label htmlFor="add-user-safety-area">Safety operational area *</Label>
-                      <Select
-                        value={addUserForm.safetyOperationalArea || '__none__'}
-                        onValueChange={(v) =>
-                          setAddUserForm((p) => ({
-                            ...p,
-                            safetyOperationalArea: v === '__none__' ? '' : v,
-                          }))
-                        }
+                            >
+                              <SelectTrigger
+                                id="add-user-department"
+                                aria-label="Department"
+                                className="h-9"
+                              >
+                                <SelectValue placeholder="Select department" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">None</SelectItem>
+                                {departments.map((d) => (
+                                  <SelectItem key={d.id} value={d.id}>
+                                    {d.name} ({d.code})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-1">
+                            <Label htmlFor="add-user-position" className="text-xs">
+                              Position
+                            </Label>
+                            <Input
+                              id="add-user-position"
+                              value={addUserForm.position}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, position: e.target.value }))
+                              }
+                              placeholder="Job title"
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2 sm:max-w-xs">
+                            <Label htmlFor="add-user-phone" className="text-xs">
+                              Phone
+                            </Label>
+                            <Input
+                              id="add-user-phone"
+                              type="tel"
+                              value={addUserForm.phone}
+                              onChange={(e) =>
+                                setAddUserForm((p) => ({ ...p, phone: e.target.value }))
+                              }
+                              placeholder="Phone number"
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
+                      </TabsContent>
+                      <TabsContent
+                        value="roles"
+                        className="mt-3 min-h-[10rem] flex-1 overflow-y-auto data-[state=inactive]:hidden"
                       >
-                        <SelectTrigger id="add-user-safety-area" aria-label="Safety operational area">
-                          <SelectValue placeholder="Select safety area" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Select area</SelectItem>
-                          {SAFETY_OPERATIONAL_AREAS.map((area) => (
-                            <SelectItem key={area} value={area}>
-                              {area.replace(/_/g, ' ')}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label htmlFor="add-user-department">Department</Label>
-                    <Select
-                      value={addUserForm.departmentId || '__none__'}
-                      onValueChange={(v) =>
-                        setAddUserForm((p) => ({ ...p, departmentId: v === '__none__' ? '' : v }))
-                      }
-                    >
-                      <SelectTrigger id="add-user-department" aria-label="Department">
-                        <SelectValue placeholder="Select department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {departments.map((d) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name} ({d.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                        <UserRoleFields
+                          compact
+                          form={addUserForm}
+                          setForm={setAddUserForm}
+                          roleAssignmentOptions={roleAssignmentOptions}
+                          safetyOperationalAreas={SAFETY_OPERATIONAL_AREAS}
+                          idPrefix="add-user"
+                        />
+                      </TabsContent>
+                    </Tabs>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="add-user-position">Position</Label>
-                    <Input
-                      id="add-user-position"
-                      value={addUserForm.position}
-                      onChange={(e) =>
-                        setAddUserForm((p) => ({ ...p, position: e.target.value }))
-                      }
-                      placeholder="Job title"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="add-user-phone">Phone</Label>
-                    <Input
-                      id="add-user-phone"
-                      type="tel"
-                      value={addUserForm.phone}
-                      onChange={(e) =>
-                        setAddUserForm((p) => ({ ...p, phone: e.target.value }))
-                      }
-                      placeholder="Phone number"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
+                  <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/30 px-5 py-3">
                     <Button
                       type="button"
                       variant="outline"
+                      size="sm"
                       onClick={() => setAddUserOpen(false)}
                     >
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={addUserSubmitting}>
-                      {addUserSubmitting ? 'Adding...' : 'Add User'}
+                    <Button type="submit" size="sm" disabled={addUserSubmitting}>
+                      {addUserSubmitting ? 'Adding...' : 'Add user'}
                     </Button>
                   </div>
                 </form>
@@ -1596,6 +1763,9 @@ const AdminPage = () => {
               </TabsContent>
               <TabsContent value="regulatory-violations" className="space-y-4">
                 <RegulatoryViolationsContent />
+              </TabsContent>
+              <TabsContent value="department-roles" className="space-y-4">
+                <DepartmentRoleCatalogContent />
               </TabsContent>
             </>
           )}

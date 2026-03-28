@@ -3,9 +3,15 @@
  * P1: CAP within 24 hours, Close Out within 7 days
  * P2: CAP within 2 weeks, Close Out within 60 days
  * P3: CAP within 4 weeks, Close Out within 90 days
+ * OBSERVATION: no CAP/CAT/root-cause due dates in the system
  */
 
-export type Priority = 'P1' | 'P2' | 'P3'
+export type DeadlinePriority = 'P1' | 'P2' | 'P3'
+
+export type Priority = DeadlinePriority | 'OBSERVATION'
+
+export const isObservationPriority = (p: string | null | undefined): boolean =>
+  String(p ?? '').toUpperCase() === 'OBSERVATION'
 
 export interface DeadlineDates {
   capDueDate: Date
@@ -13,7 +19,7 @@ export interface DeadlineDates {
   rootCauseDueDate: Date // Same as CAP due date
 }
 
-export const calculateDeadlines = (auditReportDate: Date, priority: Priority): DeadlineDates => {
+export const calculateDeadlines = (auditReportDate: Date, priority: DeadlinePriority): DeadlineDates => {
   const capDueDate = new Date(auditReportDate)
   const rootCauseDueDate = new Date(auditReportDate)
   const closeOutDueDate = new Date(auditReportDate)
@@ -57,5 +63,7 @@ export const getPriorityDescription = (priority: Priority): string => {
       return 'Priority 2: CAP within 2 weeks, Close Out within 60 days'
     case 'P3':
       return 'Priority 3: CAP within 4 weeks, Close Out within 90 days'
+    case 'OBSERVATION':
+      return 'Observation: recorded for awareness only — no CAP due date, CAT due date, or root cause workflow in the system.'
   }
 }

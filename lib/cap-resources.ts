@@ -19,6 +19,14 @@ export const CAP_RESOURCE_LABELS: Record<CapResourceValue, string> = {
   SYSTEMS_SOFTWARE: 'Systems / software',
 }
 
+/** External / third-party audits: no CAP resource categories and no AM resource gate on CAP/CAT. */
+export const auditTypeSkipsCapResourceAccountableManager = (
+  auditType: string | null | undefined
+): boolean => {
+  const t = String(auditType ?? '').toUpperCase()
+  return t === 'EXTERNAL' || t === 'THIRD_PARTY'
+}
+
 /** True if CAP needs Accountable Manager approval after Quality Manager approves (any non-NONE selection). */
 export const capRequiresAccountableManager = (
   types: string[] | null | undefined

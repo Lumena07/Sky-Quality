@@ -37,7 +37,7 @@ export async function GET(
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { error: 'Training is only available to Quality department members and Quality Manager.' },
         { status: 403 }
       )
     }
@@ -76,7 +76,7 @@ export async function PATCH(
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { error: 'Training is only available to Quality department members and Quality Manager.' },
         { status: 403 }
       )
     }
@@ -143,7 +143,7 @@ export async function DELETE(
     const { roles, departmentId } = await getCurrentUserProfile(supabase, user.id)
     if (!canSeeTraining(roles, departmentId)) {
       return NextResponse.json(
-        { error: 'Training is only available to Quality department and Accountable Manager' },
+        { error: 'Training is only available to Quality department members and Quality Manager.' },
         { status: 403 }
       )
     }

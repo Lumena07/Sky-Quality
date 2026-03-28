@@ -54,6 +54,9 @@ export const normalizeAppUserRoles = (roles: string[]): string[] => {
     focal_person: 'FOCAL_PERSON',
     auditor: 'AUDITOR',
     staff: 'STAFF',
+    pilot: 'PILOT',
+    cabin_crew: 'CABIN_CREW',
+    flight_dispatchers: 'FLIGHT_DISPATCHERS',
   }
   return roles.map((r) => {
     if (typeof r !== 'string') return String(r)
@@ -71,7 +74,11 @@ export const canAccessSmsModule = (roles: string[]): boolean =>
   isDirectorOfSafety(roles) ||
   isSafetyOfficer(roles) ||
   isAccountableManager(roles) ||
-  roles.some((r) => ['DEPARTMENT_HEAD', 'STAFF', 'QUALITY_MANAGER', 'AUDITOR'].includes(r))
+  roles.some((r) =>
+    ['DEPARTMENT_HEAD', 'STAFF', 'QUALITY_MANAGER', 'AUDITOR', 'PILOT', 'CABIN_CREW', 'FLIGHT_DISPATCHERS'].includes(
+      r
+    )
+  )
 
 /** Roles that may open the Quality (eQMS) module from the module chooser. */
 const QUALITY_MODULE_ENTRY_ROLES = new Set<string>([
@@ -83,6 +90,9 @@ const QUALITY_MODULE_ENTRY_ROLES = new Set<string>([
   'DEPARTMENT_HEAD',
   'STAFF',
   'FOCAL_PERSON',
+  'PILOT',
+  'CABIN_CREW',
+  'FLIGHT_DISPATCHERS',
 ])
 
 /** Whether the user may enter the Quality module (dashboard and related routes). */
@@ -110,12 +120,93 @@ export const canManageSmsPersonnel = (roles: string[]): boolean =>
 export const QUALITY_DEPARTMENT_ID = 'dept_quality_001'
 export const SAFETY_DEPARTMENT_ID = 'dept_safety_001'
 
-/** Can see Training tab and access training APIs: Quality department or Accountable Manager. */
-export const canSeeTraining = (
+/** Training compliance department; excluded from QMS personnel training unless AM or Quality Manager role. */
+export const TRAINING_COMPLIANCE_DEPARTMENT_ID = 'dept_training_001'
+
+/** Training compliance matrix and types: Quality Manager or Training Compliance department. */
+export const canManageTrainingCompliance = (
   roles: string[],
   departmentId: string | null
 ): boolean =>
-  departmentId === QUALITY_DEPARTMENT_ID || isAccountableManager(roles)
+  isQualityManager(roles) || departmentId === TRAINING_COMPLIANCE_DEPARTMENT_ID
+
+/** Training Compliance page (read matrix for dashboard): managers, training dept, or Accountable Manager (dashboard-only UI). */
+export const canAccessTrainingCompliancePage = (
+  roles: string[],
+  departmentId: string | null
+): boolean =>
+  canManageTrainingCompliance(roles, departmentId) || isAccountableManager(roles)
+
+/** Regulatory library (read): same entry pattern as Quality module. */
+export const canSeeRegulatoryLibrary = (roles: string[]): boolean =>
+  canAccessQualityModule(roles)
+
+/** External service providers / SLA register: Accountable Manager, Quality Manager, or Quality department members only. */
+export const canSeeExternalServiceProviders = (
+  roles: string[],
+  departmentId: string | null
+): boolean =>
+  isAccountableManager(roles) ||
+  isQualityManager(roles) ||
+  departmentId === QUALITY_DEPARTMENT_ID
+
+/** TCAA mandatory notification register and QMS audit report generation (Quality Manager only). */
+export const canSeeTcaaMandatoryNotification = (roles: string[]): boolean =>
+  isQualityManager(roles)
+
+/** Parse JSON array of strings from DB (manual holders / custodian roles). */
+export const parseJsonStringArray = (raw: unknown): string[] => {
+  if (raw == null) return []
+  if (Array.isArray(raw)) {
+    return raw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      }
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+/**
+ * Manual custodian: user's id is in manualHolderIds (legacy) OR any normalized role intersects manualCustodianRoles.
+ */
+export const isDocumentCustodian = (
+  userId: string,
+  userRoles: string[],
+  doc: { manualCustodianRoles?: unknown; manualHolderIds?: unknown }
+): boolean => {
+  const holderIds = parseJsonStringArray(doc.manualHolderIds)
+  if (holderIds.includes(userId)) return true
+  const custodianRoles = parseJsonStringArray(doc.manualCustodianRoles)
+  if (custodianRoles.length === 0) return false
+  const norm = normalizeAppUserRoles(userRoles)
+  return norm.some((r) => custodianRoles.includes(r))
+}
+
+/**
+ * Can see Training tab and QMS personnel training APIs: Quality department or Quality Manager.
+ * Training-compliance-only department: QM only. Accountable Manager alone does not use this module.
+ */
+export const canSeeTraining = (
+  roles: string[],
+  departmentId: string | null
+): boolean => {
+  if (departmentId === TRAINING_COMPLIANCE_DEPARTMENT_ID && !isQualityManager(roles)) {
+    return false
+  }
+  const amOnly =
+    isAccountableManager(roles) && !hasReviewerRole(roles) && !isQualityManager(roles)
+  if (amOnly) {
+    return false
+  }
+  return departmentId === QUALITY_DEPARTMENT_ID || isQualityManager(roles)
+}
 
 /**
  * Quality team register: QM, AM, or Auditor — consolidated roster of Quality dept + AMs (see API filter).

@@ -5,6 +5,23 @@ import { generateDocumentNumber } from '@/lib/utils'
 import { createActivityLog } from '@/lib/activity-log'
 import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard } from '@/lib/permissions'
 
+const mergeDocsById = (
+  lists: { id: string; createdAt: string }[][]
+): { id: string; createdAt: string }[] => {
+  const seen = new Set<string>()
+  const merged: { id: string; createdAt: string }[] = []
+  for (const list of lists) {
+    for (const doc of list) {
+      if (doc && !seen.has(doc.id)) {
+        seen.add(doc.id)
+        merged.push(doc)
+      }
+    }
+  }
+  merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  return merged
+}
+
 export async function GET(request: Request) {
   try {
     const supabase = createSupabaseServerClient()
@@ -40,6 +57,19 @@ export async function GET(request: Request) {
           .order('createdAt', { ascending: false })
       }
 
+      const roleDocLists: { id: string; createdAt: string }[][] = []
+      for (const r of roles) {
+        if (!r || typeof r !== 'string') continue
+        const { data, error } = await supabase
+          .from('Document')
+          .select('*, Revisions:DocumentRevision(*)')
+          .filter('manualCustodianRoles', 'cs', JSON.stringify([r]))
+          .order('createdAt', { ascending: false })
+        if (!error && data?.length) {
+          roleDocLists.push(data as { id: string; createdAt: string }[])
+        }
+      }
+
       if (approvedRes.error || manualHolderRes.error) {
         console.error('Error fetching documents:', approvedRes.error ?? manualHolderRes.error)
         return NextResponse.json(
@@ -50,15 +80,7 @@ export async function GET(request: Request) {
 
       const approved = (approvedRes.data ?? []) as { id: string; createdAt: string }[]
       const manualHolder = (manualHolderRes.data ?? []) as { id: string; createdAt: string }[]
-      const seen = new Set<string>()
-      const merged: { id: string; createdAt: string }[] = []
-      for (const doc of [...manualHolder, ...approved]) {
-        if (doc && !seen.has(doc.id)) {
-          seen.add(doc.id)
-          merged.push(doc)
-        }
-      }
-      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      const merged = mergeDocsById([manualHolder, approved, ...roleDocLists])
       return NextResponse.json(merged)
     }
 
@@ -127,7 +149,9 @@ export async function POST(request: Request) {
       issueNumber,
       revisionNumber,
       manualHolderIds,
+      manualCustodianRoles,
       smsDocument,
+      initialManualCopyNumber,
     } = body
 
     if (!title?.trim()) {
@@ -139,13 +163,33 @@ export async function POST(request: Request) {
     if (!revisionNumber?.trim()) {
       return NextResponse.json({ error: 'Revision number is required' }, { status: 400 })
     }
-    if (!Array.isArray(manualHolderIds) || manualHolderIds.length === 0) {
-      return NextResponse.json({ error: 'At least one manual holder is required' }, { status: 400 })
+
+    const custodianRoles = Array.isArray(manualCustodianRoles)
+      ? manualCustodianRoles.filter((x: unknown) => typeof x === 'string' && x.trim().length > 0)
+      : []
+    if (custodianRoles.length === 0) {
+      return NextResponse.json(
+        { error: 'At least one manual custodian role is required' },
+        { status: 400 }
+      )
     }
+
+    const holderIds = Array.isArray(manualHolderIds)
+      ? manualHolderIds.filter((id: unknown) => typeof id === 'string')
+      : []
 
     const allowedStatuses = ['DRAFT', 'REVIEW', 'APPROVED', 'RELEASED', 'OBSOLETE']
     const documentStatus =
       status && allowedStatuses.includes(status) ? status : 'DRAFT'
+
+    const trimmedInitialCopy =
+      typeof initialManualCopyNumber === 'string' ? initialManualCopyNumber.trim() : ''
+    if (documentStatus === 'APPROVED' && !trimmedInitialCopy) {
+      return NextResponse.json(
+        { error: 'Manual copy number is required for approved documents' },
+        { status: 400 }
+      )
+    }
 
     const documentId = randomUUID()
     const now = new Date().toISOString()
@@ -156,7 +200,8 @@ export async function POST(request: Request) {
       title: title.trim(),
       issueNumber: String(issueNumber).trim(),
       revisionNumber: String(revisionNumber).trim(),
-      manualHolderIds: manualHolderIds.filter((id: unknown) => typeof id === 'string'),
+      manualCustodianRoles: custodianRoles,
+      manualHolderIds: holderIds,
       version: version || '1.0',
       status: documentStatus,
       fileUrl,
@@ -188,6 +233,27 @@ export async function POST(request: Request) {
         { error: 'Failed to create document' },
         { status: 500 }
       )
+    }
+
+    if (documentStatus === 'APPROVED') {
+      const copyRowId = randomUUID()
+      const { error: copyError } = await supabase.from('DocumentManualCopy').insert({
+        id: copyRowId,
+        documentId: document.id,
+        copyNumber: trimmedInitialCopy,
+        assignedToUserId: null,
+        notes: null,
+        createdAt: now,
+        createdById: user.id,
+      })
+      if (copyError) {
+        console.error('DocumentManualCopy insert after document create', copyError)
+        await supabase.from('Document').delete().eq('id', document.id)
+        return NextResponse.json(
+          { error: 'Failed to register manual copy for this document' },
+          { status: 500 }
+        )
+      }
     }
 
     await createActivityLog({

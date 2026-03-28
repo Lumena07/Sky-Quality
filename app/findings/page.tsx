@@ -33,6 +33,7 @@ const getCorrectiveAction = (finding: Record<string, unknown>) => {
 const getOverdueForFinding = (finding: Record<string, unknown>) => {
   const ca = getCorrectiveAction(finding)
   return evaluateOverdue({
+    findingPriority: finding.priority as string | null | undefined,
     findingStatus: finding.status as string | null | undefined,
     findingDueDate: finding.dueDate as string | null | undefined,
     findingCapDueDate: finding.capDueDate as string | null | undefined,
@@ -125,6 +126,7 @@ const FindingsPage = () => {
       description: finding.description,
       rootCause: finding.rootCause || '',
       severity: finding.severity,
+      priority: finding.priority ?? '',
       status: finding.status,
       assignedTo: (() => {
         const a = finding.AssignedTo ?? finding.assignedTo

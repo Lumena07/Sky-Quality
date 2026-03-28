@@ -1,11 +1,11 @@
 'use client'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatDate } from '@/lib/utils'
 import { Upload, ArrowLeft, Check, X } from 'lucide-react'
 import Link from 'next/link'
@@ -25,9 +25,11 @@ import { supabaseBrowserClient } from '@/lib/supabaseClient'
 import {
   CAP_RESOURCE_LABELS,
   CAP_RESOURCE_VALUES,
+  auditTypeSkipsCapResourceAccountableManager,
   capRequiresAccountableManager,
   type CapResourceValue,
 } from '@/lib/cap-resources'
+import { isObservationPriority } from '@/lib/audit-deadlines'
 
 type ApprovalType = 'cap' | 'cat' | null
 
@@ -47,6 +49,8 @@ type CorrectiveActionFromFinding = {
   proposedCatDueDateReason?: string
   catDueDateProposalStatus?: string
   catDueDateRejectionReason?: string
+  amCapSignatureUrl?: string | null
+  catAuditorFollowUp?: string | null
 }
 
 /** Get CorrectiveAction from finding API response; handles PostgREST relation key variants. */
@@ -90,6 +94,10 @@ const FindingDetailPage = () => {
   const [proposalReviewSubmitting, setProposalReviewSubmitting] = useState(false)
   const [proposalRejectOpen, setProposalRejectOpen] = useState(false)
   const [proposalRejectReason, setProposalRejectReason] = useState('')
+  const [amCapSignatureDraftUrl, setAmCapSignatureDraftUrl] = useState<string | null>(null)
+  const [catFollowUpDraft, setCatFollowUpDraft] = useState('')
+  const [closingObservation, setClosingObservation] = useState(false)
+  const amCapSectionRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -143,6 +151,11 @@ const FindingDetailPage = () => {
     setProposalCatReason(row?.proposedCatDueDateReason ?? '')
   }, [finding])
 
+  useEffect(() => {
+    setAmCapSignatureDraftUrl(null)
+    setCatFollowUpDraft('')
+  }, [params.id])
+
   const fetchFinding = async () => {
     setFetchError(null)
     try {
@@ -182,8 +195,18 @@ const FindingDetailPage = () => {
 
   const ca = finding ? getCorrectiveActionFromFinding(finding) : null
 
+  const auditType =
+    finding == null
+      ? null
+      : (finding as Record<string, unknown>).Audit != null
+        ? ((finding as { Audit?: { type?: string } }).Audit?.type ?? null)
+        : ((finding as { audit?: { type?: string } | null }).audit?.type ?? null)
+  const skipAmCapResourcesUi = auditTypeSkipsCapResourceAccountableManager(auditType)
+  const isObservation = isObservationPriority(finding?.priority)
+
   const capApproved = ca?.capStatus === 'APPROVED'
-  const needsAmCapApproval = capRequiresAccountableManager(ca?.capResourceTypes)
+  const needsAmCapApproval =
+    !skipAmCapResourcesUi && capRequiresAccountableManager(ca?.capResourceTypes)
   const amCapApproved = ca?.amCapStatus === 'APPROVED'
   const amCapPending = ca?.amCapStatus === 'PENDING'
   const amCapGateOk = !needsAmCapApproval || amCapApproved
@@ -257,7 +280,7 @@ const FindingDetailPage = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             actionPlan: editActionPlan,
-            capResourceTypes: capResourceSelection,
+            capResourceTypes: skipAmCapResourcesUi ? ['NONE'] : capResourceSelection,
             proposedCatDueDate: proposalCatDueDate || null,
             proposedCatDueDateReason: proposalCatReason || null,
           }),
@@ -330,12 +353,20 @@ const FindingDetailPage = () => {
 
   const handleApprove = async (type: ApprovalType) => {
     if (!type) return
+    if (type === 'cat' && !catFollowUpDraft.trim()) {
+      alert('Enter follow up notes (how you closed this finding) before approving Corrective Action Taken.')
+      return
+    }
     setReviewSubmitting(type)
     try {
       const res = await fetch(getReviewEndpoint(type), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved: true }),
+        body: JSON.stringify(
+          type === 'cat'
+            ? { approved: true, followUp: catFollowUpDraft.trim() }
+            : { approved: true }
+        ),
         credentials: 'same-origin',
       })
       if (res.ok) await fetchFinding()
@@ -375,13 +406,20 @@ const FindingDetailPage = () => {
   const canReviewCap =
     canReviewCapCat && ca && (ca.capStatus === 'PENDING' || !ca.capStatus) && ca.actionPlan
 
-  const canReviewAmCap =
-    isAccountableManagerUser &&
-    ca &&
-    ca.capStatus === 'APPROVED' &&
-    needsAmCapApproval &&
-    amCapPending
+  /** Server-computed: aligns with PATCH /am-cap-review so UI matches API permission. */
+  const canReviewAmCap = finding?.canReviewAmCap === true
   const canReviewCat = canReviewCapCat && ca && (ca.catStatus === 'PENDING' || !ca.catStatus) && (ca.correctiveActionTaken || uploadedFiles.length > 0)
+
+  useEffect(() => {
+    if (loading || !finding) return
+    if (!isAccountableManagerUser || !canReviewAmCap) return
+    const el = amCapSectionRef.current
+    if (!el) return
+    const frame = requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [loading, finding?.id, isAccountableManagerUser, canReviewAmCap])
 
   if (loading) {
     return (
@@ -417,6 +455,11 @@ const FindingDetailPage = () => {
             {finding.Audit?.title ?? finding.audit?.title} • {finding.Department?.name ?? finding.department?.name}
           </p>
           <p className="text-sm mt-1">Assigned to: {assigneeDisplayName}</p>
+          {isObservation && (
+            <Badge className="mt-2 bg-slate-100 text-slate-800" aria-label="Finding type">
+              Observation
+            </Badge>
+          )}
         </div>
 
         <Card>
@@ -428,6 +471,47 @@ const FindingDetailPage = () => {
           </CardContent>
         </Card>
 
+        {isObservation && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Observation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                This finding is recorded as an observation. There is no CAP due date, CAT due date, or root-cause
+                workflow in the system for this item.
+              </p>
+              {finding.status !== 'CLOSED' && canReviewCapCat && (
+                <Button
+                  size="sm"
+                  disabled={closingObservation}
+                  onClick={async () => {
+                    setClosingObservation(true)
+                    try {
+                      const res = await fetch(`/api/findings/${params.id}/close-observation`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                      })
+                      if (res.ok) await fetchFinding()
+                      else alert((await res.json().catch(() => ({}))).error ?? 'Failed to close')
+                    } finally {
+                      setClosingObservation(false)
+                    }
+                  }}
+                  aria-label="Close observation finding"
+                >
+                  {closingObservation ? 'Closing…' : 'Close observation'}
+                </Button>
+              )}
+              {finding.status === 'CLOSED' && (
+                <p className="text-foreground font-medium">This observation has been closed.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {!isObservation && (
+          <>
         {/* 1. Root Cause (no approval status – just content and due date) */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -472,27 +556,29 @@ const FindingDetailPage = () => {
                   rows={4}
                   className="text-sm"
                 />
-                <fieldset className="space-y-2 rounded-md border p-3">
-                  <legend className="text-sm font-medium px-1">Resources required to implement the CAP</legend>
-                  <p className="text-xs text-muted-foreground">
-                    If anything other than &quot;No extra resources&quot; is selected, the Accountable Manager must
-                    approve after Quality approves the plan.
-                  </p>
-                  <div className="flex flex-col gap-2" role="group" aria-label="CAP resource types">
-                    {CAP_RESOURCE_VALUES.map((val) => (
-                      <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={capResourceSelection.includes(val)}
-                          onChange={(e) => handleCapResourceToggle(val, e.target.checked)}
-                          className="h-4 w-4 rounded border"
-                          aria-label={CAP_RESOURCE_LABELS[val]}
-                        />
-                        <span>{CAP_RESOURCE_LABELS[val]}</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                {!skipAmCapResourcesUi && (
+                  <fieldset className="space-y-2 rounded-md border p-3">
+                    <legend className="text-sm font-medium px-1">Resources required to implement the CAP</legend>
+                    <p className="text-xs text-muted-foreground">
+                      If anything other than &quot;No extra resources&quot; is selected, the Accountable Manager must
+                      approve after Quality approves the plan.
+                    </p>
+                    <div className="flex flex-col gap-2" role="group" aria-label="CAP resource types">
+                      {CAP_RESOURCE_VALUES.map((val) => (
+                        <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={capResourceSelection.includes(val)}
+                            onChange={(e) => handleCapResourceToggle(val, e.target.checked)}
+                            className="h-4 w-4 rounded border"
+                            aria-label={CAP_RESOURCE_LABELS[val]}
+                          />
+                          <span>{CAP_RESOURCE_LABELS[val]}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
                 <fieldset className="space-y-2 rounded-md border p-3">
                   <legend className="text-sm font-medium px-1">Longer CAT due date at CAP entry (optional)</legend>
                   <p className="text-xs text-muted-foreground">
@@ -605,40 +691,17 @@ const FindingDetailPage = () => {
                 {getStatusBadge(ca?.amCapStatus)}
               </div>
             )}
-            {canReviewAmCap && (
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    setAmReviewSubmitting(true)
-                    try {
-                      const res = await fetch(`/api/findings/${params.id}/am-cap-review`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ approved: true }),
-                        credentials: 'same-origin',
-                      })
-                      if (res.ok) await fetchFinding()
-                      else alert((await res.json().catch(() => ({}))).error ?? 'Failed to approve')
-                    } finally {
-                      setAmReviewSubmitting(false)
-                    }
-                  }}
-                  disabled={amReviewSubmitting}
+            {amCapApproved && needsAmCapApproval && ca?.amCapSignatureUrl && (
+              <div className="text-xs text-muted-foreground pt-1">
+                <span className="font-medium text-foreground">AM electronic signature: </span>
+                <a
+                  href={ca.amCapSignatureUrl}
+                  className="text-primary underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
-                  <Check className="mr-2 h-4 w-4" /> Approve (Accountable Manager)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setAmRejectReason('')
-                    setAmRejectOpen(true)
-                  }}
-                  disabled={amReviewSubmitting}
-                >
-                  <X className="mr-2 h-4 w-4" /> Reject (Accountable Manager)
-                </Button>
+                  View uploaded file
+                </a>
               </div>
             )}
             {ca?.amCapStatus === 'REJECTED' && ca.amCapRejectionReason && (
@@ -665,6 +728,179 @@ const FindingDetailPage = () => {
             )}
           </CardContent>
         </Card>
+
+        {isAccountableManagerUser && ca && (
+          <div
+            ref={amCapSectionRef}
+            className="scroll-mt-6 outline-none"
+            tabIndex={-1}
+            aria-label="Accountable Manager CAP resource approval"
+          >
+          <Card className="border-primary/40 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Accountable Manager — CAP resource approval</CardTitle>
+              <CardDescription>
+                When this CAP requires extra resources, Quality approves first; complete your resource approval here
+                (signature upload and approve or reject).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {skipAmCapResourcesUi ? (
+                <p className="text-sm text-muted-foreground rounded-md bg-muted/50 p-3">
+                  This audit type does not use Accountable Manager resource approval for corrective action plans.
+                </p>
+              ) : null}
+
+              {!skipAmCapResourcesUi && !needsAmCapApproval ? (
+                <p className="text-sm text-muted-foreground rounded-md bg-muted/50 p-3">
+                  No Accountable Manager resource approval is required for this CAP (no extra resources were selected).
+                </p>
+              ) : null}
+
+              {!skipAmCapResourcesUi && needsAmCapApproval && !capApproved ? (
+                <p className="text-sm text-muted-foreground rounded-md border border-amber-200 bg-amber-50/80 p-3 dark:bg-amber-950/20">
+                  After Quality approves this CAP, you will upload your electronic signature and approve or reject here
+                  when your action is required.
+                </p>
+              ) : null}
+
+              {canReviewAmCap ? (
+                <div className="space-y-4 rounded-md border-2 border-primary/50 bg-primary/5 p-4 dark:bg-primary/10">
+                  <p className="text-sm font-semibold">Your action is required</p>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Step 1 — Electronic signature</p>
+                    <p className="text-xs text-muted-foreground">
+                      Upload an image or PDF of your signature. Approve stays disabled until a file is attached.
+                    </p>
+                    <FileUpload
+                      entityType="cap"
+                      entityId={params.id as string}
+                      maxFiles={1}
+                      onUploadComplete={(file) => setAmCapSignatureDraftUrl(file.fileUrl)}
+                      onUploadError={(msg) => alert(msg)}
+                      disabled={amReviewSubmitting}
+                    />
+                    {amCapSignatureDraftUrl ? (
+                      <p className="text-xs text-green-700 dark:text-green-400">
+                        Signature file attached.{' '}
+                        <a
+                          href={amCapSignatureDraftUrl}
+                          className="underline font-medium"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Preview
+                        </a>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-800 dark:text-amber-200">Upload a file to enable approval.</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Step 2 — Decision</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          if (!amCapSignatureDraftUrl?.trim()) {
+                            alert('Upload your electronic signature before approving.')
+                            return
+                          }
+                          setAmReviewSubmitting(true)
+                          try {
+                            const res = await fetch(`/api/findings/${params.id}/am-cap-review`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ approved: true, signatureUrl: amCapSignatureDraftUrl }),
+                              credentials: 'same-origin',
+                            })
+                            if (res.ok) await fetchFinding()
+                            else alert((await res.json().catch(() => ({}))).error ?? 'Failed to approve')
+                          } finally {
+                            setAmReviewSubmitting(false)
+                          }
+                        }}
+                        disabled={amReviewSubmitting || !amCapSignatureDraftUrl?.trim()}
+                      >
+                        <Check className="mr-2 h-4 w-4" /> Approve CAP (resources)
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setAmRejectReason('')
+                          setAmRejectOpen(true)
+                        }}
+                        disabled={amReviewSubmitting}
+                      >
+                        <X className="mr-2 h-4 w-4" /> Reject CAP (resources)
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {!skipAmCapResourcesUi && needsAmCapApproval && capApproved && amCapApproved ? (
+                <div className="space-y-2 rounded-md border border-green-200 bg-green-50/50 p-3 dark:bg-green-950/20">
+                  <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                    You have approved this CAP (resources).
+                  </p>
+                  <div className="text-sm flex items-center gap-2">
+                    <span className="text-muted-foreground">Status:</span>
+                    {getStatusBadge(ca.amCapStatus)}
+                  </div>
+                  {ca.amCapSignatureUrl ? (
+                    <p className="text-xs">
+                      <span className="font-medium text-foreground">Your signature file: </span>
+                      <a
+                        href={ca.amCapSignatureUrl}
+                        className="text-primary underline"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View uploaded file
+                      </a>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!skipAmCapResourcesUi && needsAmCapApproval && capApproved && ca?.amCapStatus === 'REJECTED' ? (
+                <div className="rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
+                  <p className="font-medium">Accountable Manager rejection (resources)</p>
+                  {ca.amCapRejectionReason ? (
+                    <p className="mt-1 whitespace-pre-wrap">{ca.amCapRejectionReason}</p>
+                  ) : null}
+                  <p className="mt-2 text-xs">
+                    The assignee must revise and resubmit the corrective action plan for Quality review again.
+                  </p>
+                </div>
+              ) : null}
+
+              {!skipAmCapResourcesUi &&
+              needsAmCapApproval &&
+              capApproved &&
+              amCapPending &&
+              !canReviewAmCap ? (
+                <p className="text-sm text-amber-900 rounded-md border border-amber-200 bg-amber-50 p-3 dark:bg-amber-950/30 dark:text-amber-100">
+                  This CAP is waiting for Accountable Manager approval, but your session is not authorised to complete
+                  this step. If you are the Accountable Manager, confirm your profile includes the Accountable Manager
+                  role, then refresh the page.
+                </p>
+              ) : null}
+
+              {!skipAmCapResourcesUi &&
+              needsAmCapApproval &&
+              capApproved &&
+              ca?.amCapStatus === 'NOT_REQUIRED' ? (
+                <p className="text-sm text-muted-foreground rounded-md bg-muted/50 p-3">
+                  Accountable Manager resource approval is not active for this record (not required).
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+          </div>
+        )}
 
         {/* 3. Corrective Action Taken + Evidence */}
         <Card>
@@ -755,6 +991,12 @@ const FindingDetailPage = () => {
                     showUrl={false}
                   />
                 )}
+                {ca?.catAuditorFollowUp && (
+                  <div className="rounded-md border bg-muted/40 p-3 mt-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Auditor follow up (closure)</p>
+                    <p className="text-sm whitespace-pre-wrap">{ca.catAuditorFollowUp}</p>
+                  </div>
+                )}
               </>
             ) : null}
             {ca?.catStatus === 'REJECTED' && ca.catRejectionReason && (
@@ -764,13 +1006,41 @@ const FindingDetailPage = () => {
               </div>
             )}
             {canReviewCat && (
-              <div className="flex gap-2 pt-2">
-                <Button size="sm" onClick={() => handleApprove('cat')} disabled={reviewSubmitting !== null}>
-                  <Check className="mr-2 h-4 w-4" /> Approve
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setRejectDialogOpen('cat')} disabled={reviewSubmitting !== null}>
-                  <X className="mr-2 h-4 w-4" /> Reject
-                </Button>
+              <div className="space-y-3 pt-2">
+                <div className="space-y-1">
+                  <Label htmlFor="cat-follow-up" className="text-sm font-medium">
+                    Follow up (required to approve)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Describe how you closed this finding as the reviewing auditor.
+                  </p>
+                  <Textarea
+                    id="cat-follow-up"
+                    value={catFollowUpDraft}
+                    onChange={(e) => setCatFollowUpDraft(e.target.value)}
+                    rows={3}
+                    className="text-sm"
+                    placeholder="e.g. Verified evidence on site; CAT meets intent of the CAP…"
+                    aria-label="Auditor follow up before closing CAT"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleApprove('cat')}
+                    disabled={reviewSubmitting !== null || !catFollowUpDraft.trim()}
+                  >
+                    <Check className="mr-2 h-4 w-4" /> Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setRejectDialogOpen('cat')}
+                    disabled={reviewSubmitting !== null}
+                  >
+                    <X className="mr-2 h-4 w-4" /> Reject
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
@@ -1116,6 +1386,8 @@ const FindingDetailPage = () => {
             </div>
           </DialogContent>
         </Dialog>
+        </>
+        )}
       </div>
     </MainLayout>
   )

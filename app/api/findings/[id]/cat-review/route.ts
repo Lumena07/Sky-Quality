@@ -2,7 +2,11 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
-import { capRequiresAccountableManager } from '@/lib/cap-resources'
+import {
+  auditTypeSkipsCapResourceAccountableManager,
+  capRequiresAccountableManager,
+} from '@/lib/cap-resources'
+import { isObservationPriority } from '@/lib/audit-deadlines'
 
 /** Approve or reject Corrective Action Taken (CAT). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -32,13 +36,23 @@ export async function PATCH(
 
     const { data: findingRow, error: findingErr } = await supabase
       .from('Finding')
-      .select('auditId')
+      .select('auditId, priority')
       .eq('id', findingId)
       .single()
     if (findingErr || !findingRow) {
       return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
     }
+    if (isObservationPriority((findingRow as { priority?: string | null }).priority)) {
+      return NextResponse.json(
+        { error: 'Observation findings do not use CAT review in the system' },
+        { status: 400 }
+      )
+    }
     const auditId = (findingRow as { auditId: string }).auditId
+    const { data: auditRowCat } = await supabase.from('Audit').select('type').eq('id', auditId).single()
+    const skipAmCapResources = auditTypeSkipsCapResourceAccountableManager(
+      (auditRowCat as { type?: string } | null)?.type
+    )
     const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
     if (!canReview) {
       return NextResponse.json(
@@ -51,6 +65,8 @@ export async function PATCH(
     const approved = body.approved === true
     const rejectionReason =
       typeof body.rejectionReason === 'string' ? body.rejectionReason.trim() : null
+    const followUp =
+      typeof body.followUp === 'string' ? body.followUp.trim() : ''
 
     if (!approved && !rejectionReason) {
       return NextResponse.json(
@@ -99,7 +115,10 @@ export async function PATCH(
         capResourceTypes?: string[] | null
         amCapStatus?: string | null
       }
-      if (capRequiresAccountableManager(caFull.capResourceTypes ?? null)) {
+      if (
+        !skipAmCapResources &&
+        capRequiresAccountableManager(caFull.capResourceTypes ?? null)
+      ) {
         if (caFull.amCapStatus !== 'APPROVED') {
           return NextResponse.json(
             {
@@ -112,6 +131,13 @@ export async function PATCH(
       }
     }
 
+    if (approved && !followUp) {
+      return NextResponse.json(
+        { error: 'Follow up text is required before approving Corrective Action Taken (how the finding was closed)' },
+        { status: 400 }
+      )
+    }
+
     const now = new Date().toISOString()
     const status = approved ? 'APPROVED' : 'REJECTED'
     const { data: updated, error } = await supabase
@@ -121,6 +147,7 @@ export async function PATCH(
         catReviewedById: user.id,
         catReviewedAt: now,
         catRejectionReason: approved ? null : rejectionReason,
+        catAuditorFollowUp: approved ? followUp : null,
         updatedAt: now,
       })
       .eq('id', ca.id)

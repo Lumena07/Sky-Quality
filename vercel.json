@@ -9,12 +9,24 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron/escalate-finding-priority",
+      "schedule": "15 9 * * *"
+    },
+    {
+      "path": "/api/cron/tcaa-p1-closeout",
+      "schedule": "30 9 * * *"
+    },
+    {
       "path": "/api/cron/training-expiry",
       "schedule": "0 8 * * 0"
     },
     {
       "path": "/api/cron/audit-upcoming",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/sla-expiry-reminders",
+      "schedule": "0 7 * * *"
     }
   ]
 }

@@ -18,6 +18,11 @@ enum UserRole {
   DEPARTMENT_HEAD
   STAFF
   FOCAL_PERSON
+  DIRECTOR_OF_SAFETY
+  SAFETY_OFFICER
+  PILOT
+  CABIN_CREW
+  FLIGHT_DISPATCHERS
 }
 
 enum AuditStatus {
@@ -96,6 +101,25 @@ model User {
   preparationPriorFindingsReviews Audit[] @relation("PreparationPriorFindingsReviewer")
   preparationStandardsReviews     Audit[] @relation("PreparationStandardsReviewer")
   auditPreparationQuestionsCreated  AuditPreparationQuestion[]
+  tcaaMandatoryNotificationsCreated TcaaMandatoryNotification[]
+  tcaaAuditReportsGenerated          TcaaAuditReportLog[]
+  regulatoryLibraryUploads         RegulatoryLibraryDocument[]
+  serviceLevelAgreementsCreated      ServiceLevelAgreement[]
+  complianceTrainingCompletions    ComplianceTrainingCompletion[]
+  complianceTrainingCompletionHistorySubjects ComplianceTrainingCompletionHistory[] @relation("ComplianceTrainingCompletionHistorySubject")
+  complianceTrainingCompletionHistoryActors   ComplianceTrainingCompletionHistory[] @relation("ComplianceTrainingCompletionHistoryActor")
+  userComplianceDocuments          UserComplianceDocument[]       @relation("UserComplianceDocUser")
+  userComplianceDocumentsUpdated   UserComplianceDocument[]       @relation("UserComplianceDocUpdatedBy")
+  userComplianceDocumentHistory    UserComplianceDocumentHistory[] @relation("UserComplianceDocHistoryUser")
+  userComplianceDocumentHistoryBy  UserComplianceDocumentHistory[] @relation("UserComplianceDocHistoryBy")
+  auditorTrainingAssignmentsCreated AuditorTrainingAssignment[]
+  documentManualCopiesCreated        DocumentManualCopy[]
+  qmsSettingsUpdated                 QmsSettings[]
+
+  auditorRequalificationCompletedAt  DateTime?
+  auditorRequalificationCourseNotes  String?
+
+  roleMetadata Json?
 
   @@index([email])
   @@index([departmentId])
@@ -111,11 +135,29 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users       User[]
-  audits      Audit[]
-  findings    Finding[]
-  documents   Document[]
-  trainings   TrainingRecord[]
+  users                  User[]
+  audits                 Audit[]
+  findings               Finding[]
+  documents              Document[]
+  trainings              TrainingRecord[]
+  departmentRoleCatalogs DepartmentRoleCatalog[]
+}
+
+model DepartmentRoleCatalog {
+  id           String   @id @default(cuid())
+  departmentId String
+  name         String
+  roleCode     String?
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@index([departmentId])
+  @@index([roleCode])
+  @@map("DepartmentRoleCatalog")
 }
 
 model Audit {
@@ -258,6 +300,7 @@ model Finding {
   attachments       FindingAttachment[]
   notifications     Notification[]
   activityLogs      ActivityLog[]
+  tcaaMandatoryNotifications TcaaMandatoryNotification[]
 
   @@index([auditId])
   @@index([departmentId])
@@ -267,6 +310,54 @@ model Finding {
   @@index([findingNumber])
   @@index([priority])
   @@index([checklistItemId])
+}
+
+/// TCAA mandatory notification register (QM manual + auto P1 close-out overdue). Table name matches Supabase migration.
+model TcaaMandatoryNotification {
+  id          String    @id @default(cuid())
+  findingId   String
+  source      String
+  notes       String?
+  createdAt   DateTime  @default(now())
+  createdById String
+  resolvedAt  DateTime?
+
+  finding   Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([findingId])
+  @@index([createdAt])
+  @@map("TcaaMandatoryNotification")
+}
+
+/// Single-row QMS settings (operator / AOC for reports). Table: QmsSettings.
+model QmsSettings {
+  id                String    @id @default("singleton")
+  operatorLegalName String?
+  aocNumber         String?
+  reportFooterText  String?
+  updatedAt         DateTime?
+  updatedById       String?
+  updatedBy         User?     @relation(fields: [updatedById], references: [id])
+
+  @@map("QmsSettings")
+}
+
+model TcaaAuditReportLog {
+  id                   String   @id @default(cuid())
+  reportType           String
+  periodLabel          String
+  periodStart          DateTime
+  periodEnd            DateTime
+  executiveSummaryText String?
+  pdfFileUrl           String?
+  generatedAt          DateTime @default(now())
+  generatedById        String
+
+  generatedBy User @relation(fields: [generatedById], references: [id], onDelete: Cascade)
+
+  @@index([generatedAt])
+  @@map("TcaaAuditReportLog")
 }
 
 model FindingAttachment {
@@ -310,6 +401,10 @@ model CorrectiveAction {
   catReviewedById   String?
   catReviewedAt     DateTime?
   catRejectionReason String?
+
+  // QMS: AM electronic signature when CAP requires resources; auditor closure notes on CAT approve
+  amCapSignatureUrl   String?
+  catAuditorFollowUp  String?
 
   status            FindingStatus @default(IN_PROGRESS)  // overall record workflow
 
@@ -362,6 +457,9 @@ model Document {
   revisions       DocumentRevision[]
   acknowledgments DocumentAcknowledgment[]
   activityLogs    ActivityLog[]
+  manualCopies    DocumentManualCopy[]
+
+  manualCustodianRoles Json? @default("[]")
 
   @@index([documentNumber])
   @@index([departmentId])
@@ -395,6 +493,208 @@ model DocumentAcknowledgment {
   @@unique([documentId, userId])
   @@index([documentId])
   @@index([userId])
+}
+
+model DocumentManualCopy {
+  id               String   @id @default(cuid())
+  documentId       String
+  copyNumber       String
+  assignedToUserId String?
+  notes            String?
+  createdAt        DateTime @default(now())
+  createdById      String
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, copyNumber])
+  @@index([documentId])
+  @@map("DocumentManualCopy")
+}
+
+model RegulatoryLibraryDocument {
+  id           String   @id @default(cuid())
+  kind         String
+  title        String
+  category     String?
+  version      String?
+  acNumber     String?
+  subject      String?
+  fileUrl      String
+  fileType     String
+  fileSize     Int
+  uploadedAt   DateTime @default(now())
+  uploadedById String
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([kind])
+  @@index([uploadedAt])
+  @@map("RegulatoryLibraryDocument")
+}
+
+model ServiceLevelAgreement {
+  id           String   @id @default(cuid())
+  companyName  String
+  slaType      String
+  location     String?
+  contractDate DateTime @db.Date
+  isEvergreen  Boolean  @default(false)
+  expiryDate   DateTime? @db.Date
+  pdfFileUrl   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdById  String
+
+  createdBy User                     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  reminders SlaExpiryNotificationSent[]
+
+  @@index([expiryDate])
+  @@map("ServiceLevelAgreement")
+}
+
+model SlaExpiryNotificationSent {
+  id            String   @id @default(cuid())
+  slaId         String
+  thresholdDays Int
+  sentAt        DateTime @default(now())
+
+  sla ServiceLevelAgreement @relation(fields: [slaId], references: [id], onDelete: Cascade)
+
+  @@unique([slaId, thresholdDays])
+  @@map("SlaExpiryNotificationSent")
+}
+
+model ComplianceTrainingType {
+  id                       String   @id @default(cuid())
+  name                     String
+  intervalMonths           Int
+  mandatoryForAll          Boolean  @default(false)
+  applicableRoles          Json?
+  applicableUserIds        Json?
+  applicableDepartmentIds  Json?
+  applicableRoleMetadata   Json?
+  isSystemSeeded           Boolean  @default(false)
+  createdAt                DateTime @default(now())
+
+  completions ComplianceTrainingCompletion[]
+  completionHistories ComplianceTrainingCompletionHistory[]
+
+  @@map("ComplianceTrainingType")
+}
+
+model ComplianceTrainingCompletionHistory {
+  id                  String    @id @default(cuid())
+  userId              String
+  trainingTypeId      String
+  createdAt           DateTime  @default(now())
+  createdById         String?
+  lastCompletedAt     DateTime?
+  nextDueAt           DateTime?
+  completionProofUrl  String?
+
+  user         User                   @relation("ComplianceTrainingCompletionHistorySubject", fields: [userId], references: [id], onDelete: Cascade)
+  trainingType ComplianceTrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Cascade)
+  createdBy    User?                  @relation("ComplianceTrainingCompletionHistoryActor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId, trainingTypeId])
+  @@index([createdAt])
+  @@map("ComplianceTrainingCompletionHistory")
+}
+
+model ComplianceTrainingCompletion {
+  id                  String    @id @default(cuid())
+  trainingTypeId      String
+  userId              String
+  lastCompletedAt     DateTime?
+  nextDueAt           DateTime?
+  completionProofUrl  String?
+  updatedAt           DateTime  @updatedAt
+
+  trainingType ComplianceTrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Cascade)
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([trainingTypeId, userId])
+  @@index([userId])
+  @@map("ComplianceTrainingCompletion")
+}
+
+model CompliancePersonalDocumentKind {
+  id               String   @id @default(cuid())
+  code             String   @unique
+  label            String
+  applicableRoles  Json?
+  sortOrder        Int      @default(0)
+  isSystem         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@index([sortOrder])
+  @@map("CompliancePersonalDocumentKind")
+}
+
+model UserComplianceDocument {
+  id           String    @id @default(cuid())
+  userId       String
+  documentKind String
+  expiryDate   DateTime? @db.Date
+  pdfFileUrl   String?
+  updatedAt    DateTime  @updatedAt
+  updatedById  String?
+
+  user      User  @relation("UserComplianceDocUser", fields: [userId], references: [id], onDelete: Cascade)
+  updatedBy User? @relation("UserComplianceDocUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([userId, documentKind])
+  @@index([userId])
+  @@map("UserComplianceDocument")
+}
+
+model UserComplianceDocumentHistory {
+  id             String    @id @default(cuid())
+  userId         String
+  documentKind   String
+  createdAt      DateTime  @default(now())
+  createdById    String?
+  expiryDate     DateTime? @db.Date
+  pdfFileUrl     String?
+
+  user      User  @relation("UserComplianceDocHistoryUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("UserComplianceDocHistoryBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId, documentKind])
+  @@index([createdAt])
+  @@map("UserComplianceDocumentHistory")
+}
+
+model AuditorTrainingCourse {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  assignments AuditorTrainingAssignment[]
+
+  @@map("AuditorTrainingCourse")
+}
+
+model AuditorTrainingAssignment {
+  id             String    @id @default(cuid())
+  courseId       String
+  userId         String
+  completedAt    DateTime?
+  scheduledDate  DateTime? @db.Date
+  location       String?
+  createdAt      DateTime  @default(now())
+  createdById    String
+
+  course    AuditorTrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User                  @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([userId])
+  @@map("AuditorTrainingAssignment")
 }
 
 model TrainingRecord {

@@ -190,7 +190,9 @@ const AmDashboardPage = () => {
             <CardHeader className="flex flex-row items-start justify-between space-y-0">
               <div>
                 <CardTitle>Pending CAP approvals</CardTitle>
-                <CardDescription>Corrective Action Plans awaiting your approval (resources required).</CardDescription>
+                <CardDescription>
+                  Corrective Action Plans awaiting your approval when extra resources are required.
+                </CardDescription>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-xs">

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer'
+import { fetchActiveCatalogRoleCodes, USER_PLATFORM_ROLE_CODES } from '@/lib/department-role-catalog'
+import { sanitizeRoleMetadataForRoles } from '@/lib/role-metadata'
 
 export async function GET(request: Request) {
   try {
@@ -29,6 +31,8 @@ export async function GET(request: Request) {
         role,
         roles,
         position,
+        safetyOperationalArea,
+        roleMetadata,
         isActive,
         organizationId,
         Department:departmentId (
@@ -86,6 +90,7 @@ export async function POST(request: Request) {
       lastName,
       roles: rolesBody,
       safetyOperationalArea,
+      roleMetadata: roleMetadataBody,
       departmentId,
       organizationId,
       position,
@@ -117,22 +122,30 @@ export async function POST(request: Request) {
       )
     }
 
-    const validRoles = [
-      'QUALITY_MANAGER',
-      'ACCOUNTABLE_MANAGER',
-      'AUDITOR',
-      'DEPARTMENT_HEAD',
-      'STAFF',
-      'FOCAL_PERSON',
-      'DIRECTOR_OF_SAFETY',
-      'SAFETY_OFFICER',
-    ]
-    const roles: string[] = Array.isArray(rolesBody)
-      ? rolesBody.filter((r: unknown) => typeof r === 'string' && validRoles.includes(r.trim()))
-      : []
+    const allowedFromCatalog = await fetchActiveCatalogRoleCodes(supabase)
+    if (allowedFromCatalog.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'No active roles in the department role catalog. Add catalog entries with a role code in Admin → Department roles.',
+        },
+        { status: 400 }
+      )
+    }
+    const allowedSet = new Set<string>([...allowedFromCatalog, ...USER_PLATFORM_ROLE_CODES])
+    let roles: string[] = []
+    if (Array.isArray(rolesBody)) {
+      const trimmed: string[] = rolesBody
+        .filter((r: unknown) => typeof r === 'string' && allowedSet.has(r.trim()))
+        .map((r: string) => r.trim())
+      roles = trimmed.filter((role: string, index: number) => trimmed.indexOf(role) === index)
+    }
     if (roles.length === 0) {
       return NextResponse.json(
-        { error: 'At least one role is required' },
+        {
+          error:
+            'At least one valid role is required (active department role catalog code, FOCAL_PERSON, or SYSTEM_ADMIN).',
+        },
         { status: 400 }
       )
     }
@@ -146,6 +159,11 @@ export async function POST(request: Request) {
         { error: 'Safety operational area is required for Safety Officer role' },
         { status: 400 }
       )
+    }
+
+    const metaRes = sanitizeRoleMetadataForRoles(roles, roleMetadataBody ?? {})
+    if (!metaRes.ok) {
+      return NextResponse.json({ error: metaRes.error }, { status: 400 })
     }
 
     const emailNormalized = email.trim().toLowerCase()
@@ -216,6 +234,7 @@ export async function POST(request: Request) {
         position && String(position).trim() ? String(position).trim() : null,
       phone: phone && String(phone).trim() ? String(phone).trim() : null,
       safetyOperationalArea: normalizedSafetyArea,
+      roleMetadata: metaRes.value,
       isActive: true,
       updatedAt: now,
     }
@@ -234,6 +253,7 @@ export async function POST(request: Request) {
         roles,
         position,
         safetyOperationalArea,
+        roleMetadata,
         isActive,
         Department:departmentId (
           id,

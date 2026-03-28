@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { generateFindingNumber } from '@/lib/utils'
-import { calculateDeadlines } from '@/lib/audit-deadlines'
+import { calculateDeadlines, isObservationPriority } from '@/lib/audit-deadlines'
 import { createActivityLog } from '@/lib/activity-log'
 
 export async function POST(
@@ -60,6 +60,11 @@ export async function POST(
       )
     }
 
+    const priorityNorm = String(priority).toUpperCase()
+    if (!['P1', 'P2', 'P3', 'OBSERVATION'].includes(priorityNorm)) {
+      return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
+    }
+
     const { data: audit, error: auditError } = await supabase
       .from('Audit')
       .select('*')
@@ -80,7 +85,10 @@ export async function POST(
       .single()
 
     const auditReportDate = audit.updatedAt || audit.createdAt
-    const deadlines = calculateDeadlines(auditReportDate, priority as 'P1' | 'P2' | 'P3')
+    const isObs = isObservationPriority(priorityNorm)
+    const deadlines = isObs
+      ? null
+      : calculateDeadlines(auditReportDate, priorityNorm as 'P1' | 'P2' | 'P3')
 
     const now = new Date().toISOString()
     const { data: finding, error: findingError } = await supabase
@@ -92,14 +100,21 @@ export async function POST(
         departmentId,
         policyReference: checklistItem?.ref || checklistItem?.auditQuestion || 'N/A',
         description,
-        rootCause: rootCause || null,
-        severity: priority === 'P1' ? 'Critical' : priority === 'P2' ? 'Major' : 'Minor',
-        priority,
+        rootCause: isObs ? null : rootCause || null,
+        severity: isObs
+          ? 'Observation'
+          : priorityNorm === 'P1'
+            ? 'Critical'
+            : priorityNorm === 'P2'
+              ? 'Major'
+              : 'Minor',
+        priority: priorityNorm,
         checklistItemId,
         assignedToId,
         classificationId: classificationId || null,
-        capDueDate: deadlines.capDueDate.toISOString(),
-        closeOutDueDate: deadlines.closeOutDueDate.toISOString(),
+        capDueDate: deadlines ? deadlines.capDueDate.toISOString() : null,
+        closeOutDueDate: deadlines ? deadlines.closeOutDueDate.toISOString() : null,
+        ...(isObs ? { dueDate: null } : {}),
         status: 'OPEN',
         createdById: user.id,
         updatedAt: now,
@@ -115,7 +130,7 @@ export async function POST(
       )
     }
 
-    if (actionPlan) {
+    if (!isObs && actionPlan && deadlines) {
       const { data: correctiveAction, error: caError } = await supabase
         .from('CorrectiveAction')
         .insert({

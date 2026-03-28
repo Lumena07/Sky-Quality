@@ -40,6 +40,9 @@ type RegisterUser = {
   departmentName: string | null
   roles: string[]
   trainingRecords: TrainingRecordRow[]
+  lastAuditConductedAt?: string | null
+  requalificationRequired?: boolean
+  requalificationCourseCompletedAt?: string | null
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -407,7 +410,7 @@ const QualityTeamPage = () => {
                                 </CardDescription>
                               </div>
                               <div
-                                className="flex flex-wrap gap-1.5"
+                                className="flex flex-wrap gap-1.5 items-center"
                                 role="list"
                                 aria-label="Assigned roles"
                               >
@@ -416,6 +419,12 @@ const QualityTeamPage = () => {
                                     {formatRoleLabel(r)}
                                   </Badge>
                                 ))}
+                                {person.roles.includes('AUDITOR') && person.requalificationRequired && (
+                                  <Badge variant="destructive" className="gap-1" role="status">
+                                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                                    Requalification required
+                                  </Badge>
+                                )}
                               </div>
                             </div>
                           </CardHeader>

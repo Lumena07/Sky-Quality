@@ -2,10 +2,12 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import {
+  auditTypeSkipsCapResourceAccountableManager,
   capRequiresAccountableManager,
   normalizeCapResourceTypes,
   validateCapResourceTypes,
 } from '@/lib/cap-resources'
+import { isObservationPriority } from '@/lib/audit-deadlines'
 
 /** Notify auditors of the finding's audit that assignee submitted CAP or CAT for review. */
 async function notifyAuditorsForFinding(
@@ -67,12 +69,34 @@ export async function PATCH(
 
     const { data: finding, error: findErr } = await supabase
       .from('Finding')
-      .select('id, assignedToId, auditId, findingNumber, status, capDueDate, closeOutDueDate')
+      .select('id, assignedToId, auditId, findingNumber, status, capDueDate, closeOutDueDate, priority')
       .eq('id', findingId)
       .single()
 
     if (findErr || !finding) {
       return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
+    }
+
+    const auditIdForFinding = (finding as { auditId?: string }).auditId
+    let auditType: string | null = null
+    if (auditIdForFinding) {
+      const { data: auditRow } = await supabase
+        .from('Audit')
+        .select('type')
+        .eq('id', auditIdForFinding)
+        .single()
+      auditType = (auditRow as { type?: string } | null)?.type ?? null
+    }
+    const skipAmCapResources = auditTypeSkipsCapResourceAccountableManager(auditType)
+
+    if (isObservationPriority((finding as { priority?: string | null }).priority)) {
+      return NextResponse.json(
+        {
+          error:
+            'This finding is an observation. It does not use CAP/CAT in the system — use Close observation instead.',
+        },
+        { status: 400 }
+      )
     }
 
     const assignedToId = (finding as { assignedToId: string }).assignedToId
@@ -109,7 +133,10 @@ export async function PATCH(
         capResourceTypes?: string[] | null
         amCapStatus?: string | null
       } | null
-      if (capRequiresAccountableManager(caRow?.capResourceTypes ?? null)) {
+      if (
+        !skipAmCapResources &&
+        capRequiresAccountableManager(caRow?.capResourceTypes ?? null)
+      ) {
         if (caRow?.amCapStatus !== 'APPROVED') {
           return NextResponse.json(
             {
@@ -137,6 +164,9 @@ export async function PATCH(
             ? normalizeCapResourceTypes(body.capResourceTypes)
             : normalizeCapResourceTypes((existingCa as { capResourceTypes?: string[] }).capResourceTypes)
         if (resourceTypes.length === 0) resourceTypes = ['NONE']
+        if (skipAmCapResources) {
+          resourceTypes = ['NONE']
+        }
         const val = validateCapResourceTypes(resourceTypes)
         if (!val.ok) {
           return NextResponse.json({ error: val.error }, { status: 400 })
@@ -200,6 +230,9 @@ export async function PATCH(
           ? normalizeCapResourceTypes(body.capResourceTypes)
           : ['NONE']
       if (resourceTypes.length === 0) resourceTypes = ['NONE']
+      if (skipAmCapResources) {
+        resourceTypes = ['NONE']
+      }
       const val = validateCapResourceTypes(resourceTypes)
       if (!val.ok) {
         return NextResponse.json({ error: val.error }, { status: 400 })
@@ -207,6 +240,7 @@ export async function PATCH(
       if (
         correctiveActionTaken !== null &&
         correctiveActionTaken !== '' &&
+        !skipAmCapResources &&
         capRequiresAccountableManager(resourceTypes)
       ) {
         return NextResponse.json(

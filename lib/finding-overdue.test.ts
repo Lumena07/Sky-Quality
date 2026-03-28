@@ -88,4 +88,14 @@ describe('finding overdue evaluator', () => {
     }
     expect(evaluateOverdue(input, NOW_ISO)).toEqual({ isOverdue: true, kind: 'FINDING_DUE' })
   })
+
+  it('OBSERVATION priority is never overdue in evaluateOverdue', () => {
+    const input = {
+      findingPriority: 'OBSERVATION',
+      findingStatus: 'OPEN',
+      findingCapDueDate: '2026-03-18T00:00:00.000Z',
+      hasCorrectiveAction: false,
+    }
+    expect(evaluateOverdue(input, NOW_ISO)).toEqual({ isOverdue: false, kind: 'NONE' })
+  })
 })

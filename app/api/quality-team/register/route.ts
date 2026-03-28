@@ -6,6 +6,7 @@ import {
   getCurrentUserProfile,
   QUALITY_DEPARTMENT_ID,
 } from '@/lib/permissions'
+import { computeAuditorRequalification } from '@/lib/auditor-requalification'
 
 type DepartmentRef = { id: string; name: string } | { id: string; name: string }[] | null
 
@@ -75,6 +76,8 @@ export async function GET() {
       organizationId,
       roles,
       role,
+      auditorRequalificationCompletedAt,
+      auditorRequalificationCourseNotes,
       Department:departmentId (
         id,
         name
@@ -176,6 +179,39 @@ export async function GET() {
       return NextResponse.json({ users: [] })
     }
 
+    const { data: audits, error: audErr } = await supabase
+      .from('Audit')
+      .select(
+        `
+        endDate,
+        scheduledDate,
+        status,
+        AuditAuditor ( userId )
+      `
+      )
+      .in('status', ['COMPLETED', 'CLOSED'])
+    if (audErr) {
+      console.warn('Quality team register: audit fetch for requalification', audErr)
+    }
+    const lastAuditByUser = new Map<string, string>()
+    for (const a of audits ?? []) {
+      const row = a as {
+        endDate?: string | null
+        scheduledDate?: string | null
+        AuditAuditor?: { userId?: string }[] | { userId?: string } | null
+      }
+      const dateStr = row.endDate ?? row.scheduledDate
+      if (!dateStr) continue
+      const raw = row.AuditAuditor
+      const links = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : []
+      for (const link of links) {
+        const uid = link?.userId
+        if (!uid) continue
+        const prev = lastAuditByUser.get(uid)
+        if (!prev || dateStr > prev) lastAuditByUser.set(uid, dateStr)
+      }
+    }
+
     const { data: trainingRows, error: trErr } = await supabase
       .from('TrainingRecord')
       .select('id, userId, name, recordType, completedAt, expiryDate, documentUrl')
@@ -198,17 +234,33 @@ export async function GET() {
       trainingByUser.set(tr.userId, list)
     }
 
-    const users = merged.map((u) => ({
-      id: u.id,
-      email: u.email,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      position: u.position,
-      departmentId: u.departmentId,
-      departmentName: deptName(u.Department ?? null),
-      roles: normalizeRoles(u),
-      trainingRecords: trainingByUser.get(u.id) ?? [],
-    }))
+    const users = merged.map((u) => {
+      const roles = normalizeRoles(u)
+      const lastAudit = lastAuditByUser.get(u.id) ?? null
+      const uWithRequal = u as UserRow & {
+        auditorRequalificationCompletedAt?: string | null
+        auditorRequalificationCourseNotes?: string | null
+      }
+      const requal = computeAuditorRequalification({
+        userRoles: roles,
+        lastAuditConductedAt: lastAudit,
+        auditorRequalificationCompletedAt: uWithRequal.auditorRequalificationCompletedAt ?? null,
+      })
+      return {
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        position: u.position,
+        departmentId: u.departmentId,
+        departmentName: deptName(u.Department ?? null),
+        roles,
+        trainingRecords: trainingByUser.get(u.id) ?? [],
+        lastAuditConductedAt: requal.lastAuditConductedAt,
+        requalificationRequired: requal.requalificationRequired,
+        requalificationCourseCompletedAt: requal.requalificationCourseCompletedAt,
+      }
+    })
 
     return NextResponse.json({ users })
   } catch (error) {

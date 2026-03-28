@@ -48,5 +48,10 @@ describe('audit-deadlines', () => {
       expect(desc).toContain('4 weeks')
       expect(desc).toContain('90 days')
     })
+    it('returns description for OBSERVATION', () => {
+      const desc = getPriorityDescription('OBSERVATION')
+      expect(desc.toLowerCase()).toContain('observation')
+      expect(desc.toLowerCase()).toContain('no cap')
+    })
   })
 })

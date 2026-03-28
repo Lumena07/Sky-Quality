@@ -19,6 +19,17 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabaseBrowserClient } from '@/lib/supabaseClient'
+import { isDocumentCustodian, parseJsonStringArray } from '@/lib/permissions'
+
+const CUSTODIAN_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'QUALITY_MANAGER', label: 'Quality Manager' },
+  { value: 'AUDITOR', label: 'Auditor' },
+  { value: 'ACCOUNTABLE_MANAGER', label: 'Accountable Manager' },
+  { value: 'DEPARTMENT_HEAD', label: 'Department Head' },
+  { value: 'STAFF', label: 'Staff' },
+  { value: 'SYSTEM_ADMIN', label: 'System Admin' },
+  { value: 'FOCAL_PERSON', label: 'Focal Person' },
+]
 
 const DocumentsPage = () => {
   const [documents, setDocuments] = useState<any[]>([])
@@ -43,9 +54,10 @@ const DocumentsPage = () => {
   const [newDocTitle, setNewDocTitle] = useState('')
   const [newDocIssueNumber, setNewDocIssueNumber] = useState('')
   const [newDocRevisionNumber, setNewDocRevisionNumber] = useState('')
-  const [newDocManualHolderIds, setNewDocManualHolderIds] = useState<string[]>([])
+  const [newDocCustodianRoles, setNewDocCustodianRoles] = useState<string[]>([])
   const [newDocDepartmentIds, setNewDocDepartmentIds] = useState<string[]>([])
   const [newDocFile, setNewDocFile] = useState<File | null>(null)
+  const [newDocCopyNumber, setNewDocCopyNumber] = useState('')
   const [newDocPending, setNewDocPending] = useState(false)
   const [users, setUsers] = useState<{ id: string; firstName?: string; lastName?: string; email?: string }[]>([])
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
@@ -234,8 +246,12 @@ const DocumentsPage = () => {
       alert('Revision number is required')
       return
     }
-    if (newDocManualHolderIds.length === 0) {
-      alert('At least one manual holder is required')
+    if (newDocCustodianRoles.length === 0) {
+      alert('Select at least one manual custodian role')
+      return
+    }
+    if (activeTab === 'approved' && !newDocCopyNumber.trim()) {
+      alert('Manual copy number is required for approved documents')
       return
     }
     setNewDocPending(true)
@@ -264,7 +280,8 @@ const DocumentsPage = () => {
           title,
           issueNumber,
           revisionNumber,
-          manualHolderIds: newDocManualHolderIds,
+          manualCustodianRoles: newDocCustodianRoles,
+          manualHolderIds: [],
           departmentIds: activeTab === 'approved' ? newDocDepartmentIds : [],
           version: '1.0',
           fileUrl,
@@ -276,6 +293,9 @@ const DocumentsPage = () => {
               : activeTab === 'approved'
                 ? 'APPROVED'
                 : 'DRAFT',
+          ...(activeTab === 'approved'
+            ? { initialManualCopyNumber: newDocCopyNumber.trim() }
+            : {}),
         }),
         credentials: 'include',
       })
@@ -288,8 +308,9 @@ const DocumentsPage = () => {
       setNewDocTitle('')
       setNewDocIssueNumber('')
       setNewDocRevisionNumber('')
-      setNewDocManualHolderIds([])
+      setNewDocCustodianRoles([])
       setNewDocDepartmentIds([])
+      setNewDocCopyNumber('')
       setNewDocFile(null)
       fetchDocuments()
     } catch (e) {
@@ -340,9 +361,9 @@ const DocumentsPage = () => {
     return names.length > 0 ? names.join(', ') : '—'
   }
 
-  const getManualHolderNames = (doc: { manualHolderIds?: string[]; manual_holder_ids?: string[] }): string => {
+  const getLegacyHolderNames = (doc: { manualHolderIds?: string[]; manual_holder_ids?: string[] }): string => {
     const ids = doc.manualHolderIds ?? doc.manual_holder_ids ?? []
-    if (ids.length === 0) return '—'
+    if (!Array.isArray(ids) || ids.length === 0) return ''
     const names = ids
       .map((id) => {
         const u = users.find((x) => x.id === id)
@@ -350,13 +371,31 @@ const DocumentsPage = () => {
         return [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || id
       })
       .filter(Boolean)
-    return names.length > 0 ? names.join(', ') : '—'
+    return names.length > 0 ? names.join(', ') : ''
   }
 
-  const isManualHolder = (doc: { manualHolderIds?: string[]; manual_holder_ids?: string[] }): boolean => {
+  const formatCustodianSummary = (doc: {
+    manualCustodianRoles?: unknown
+    manualHolderIds?: string[]
+    manual_holder_ids?: string[]
+  }): string => {
+    const roleCodes = parseJsonStringArray(doc.manualCustodianRoles)
+    const roleLabels = roleCodes.map(
+      (r) => CUSTODIAN_ROLE_OPTIONS.find((o) => o.value === r)?.label ?? r
+    )
+    const legacy = getLegacyHolderNames(doc)
+    const parts: string[] = []
+    if (roleLabels.length > 0) parts.push(roleLabels.join(', '))
+    if (legacy) parts.push(`Legacy holders: ${legacy}`)
+    return parts.length > 0 ? parts.join(' · ') : '—'
+  }
+
+  const isCustodianForDoc = (doc: {
+    manualCustodianRoles?: unknown
+    manualHolderIds?: unknown
+  }): boolean => {
     if (!currentUserId) return false
-    const ids = doc.manualHolderIds ?? doc.manual_holder_ids ?? []
-    return Array.isArray(ids) && ids.includes(currentUserId)
+    return isDocumentCustodian(currentUserId, userRoles, doc)
   }
 
   const renderDocRow = (
@@ -370,9 +409,9 @@ const DocumentsPage = () => {
   ) => {
     const status = doc.status as string
     const isReviewOrDraft = status === 'REVIEW' || status === 'DRAFT'
-    const isManualHolderForDoc = isManualHolder(doc)
+    const isCustodian = isCustodianForDoc(doc)
     const canOpenOrEdit =
-      !isReviewOrDraft || isManualHolderForDoc || hasReviewerRole
+      !isReviewOrDraft || isCustodian || hasReviewerRole
     const canEditApprovedPdf = status === 'APPROVED' ? hasReviewerRole : canOpenOrEdit
     const showOpenInWord = options.openInWord && canOpenOrEdit
     const showUploadNewVersion = options.uploadNewVersion && canOpenOrEdit
@@ -403,9 +442,9 @@ const DocumentsPage = () => {
               {(doc.revisionNumber ?? doc.revision_number) ?? '—'}
             </div>
             <div className="text-sm min-w-0">
-              <span className="text-muted-foreground">Manual holders: </span>
-              <span className="truncate block" title={getManualHolderNames(doc)}>
-                {getManualHolderNames(doc)}
+              <span className="text-muted-foreground">Manual custodian: </span>
+              <span className="truncate block" title={formatCustodianSummary(doc)}>
+                {formatCustodianSummary(doc)}
               </span>
             </div>
             <div className="text-sm min-w-0">
@@ -418,7 +457,7 @@ const DocumentsPage = () => {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isReviewOrDraft && !canOpenOrEdit && (
-            <span className="text-xs text-muted-foreground">Manual holders only</span>
+            <span className="text-xs text-muted-foreground">Manual custodians only</span>
           )}
           {showOpenInWord && (
             <Button
@@ -733,9 +772,15 @@ const DocumentsPage = () => {
         </Dialog>
 
         {/* Upload new document */}
-        <Dialog open={uploadDocOpen} onOpenChange={setUploadDocOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
+        <Dialog
+          open={uploadDocOpen}
+          onOpenChange={(open) => {
+            setUploadDocOpen(open)
+            if (!open) setNewDocCopyNumber('')
+          }}
+        >
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0 overflow-hidden p-6 sm:max-h-[min(90vh,760px)]">
+            <DialogHeader className="shrink-0 space-y-1 pr-8">
               <DialogTitle>Upload Document</DialogTitle>
               <DialogDescription>
                 Saved under{' '}
@@ -744,148 +789,166 @@ const DocumentsPage = () => {
                   : activeTab === 'approved'
                     ? 'Approved'
                     : 'Masters'}
-                . Issue, revision, and manual holders required.
+                . Issue, revision, custodian roles, and file are required
+                {activeTab === 'approved' ? '; manual copy number is required for Approved.' : '.'}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-1 gap-4 py-2">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <Label htmlFor="new-doc-title">Title *</Label>
-                  <Input
-                    id="new-doc-title"
-                    placeholder="Document title"
-                    value={newDocTitle}
-                    onChange={(e) => setNewDocTitle(e.target.value)}
-                    className="mt-1"
-                    aria-required="true"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="new-doc-issue">Issue *</Label>
-                  <Input
-                    id="new-doc-issue"
-                    placeholder="e.g. 1"
-                    value={newDocIssueNumber}
-                    onChange={(e) => setNewDocIssueNumber(e.target.value)}
-                    className="mt-1"
-                    aria-required="true"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="new-doc-revision">Revision *</Label>
-                  <Input
-                    id="new-doc-revision"
-                    placeholder="e.g. 0"
-                    value={newDocRevisionNumber}
-                    onChange={(e) => setNewDocRevisionNumber(e.target.value)}
-                    className="mt-1"
-                    aria-required="true"
-                  />
-                </div>
-              </div>
-              <div className={`grid gap-4 ${activeTab === 'approved' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-                <div>
-                  <Label>Manual holders *</Label>
-                  <p className="text-xs text-muted-foreground mb-1">
-                    Can open/edit (Under Review / Masters).
-                  </p>
-                  <div className="mt-1 border rounded-md p-2 max-h-32 overflow-y-auto bg-muted/30 space-y-1.5">
-                    {users.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Loading users…</p>
+            <div className="min-h-0 flex-1 overflow-y-auto py-2 -mx-1 px-1">
+              <div className="grid gap-5 lg:grid-cols-2 lg:gap-6 lg:items-start">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-foreground">Document</p>
+                    <div className="space-y-2">
+                      <Label htmlFor="new-doc-title">Title *</Label>
+                      <Input
+                        id="new-doc-title"
+                        placeholder="Document title"
+                        value={newDocTitle}
+                        onChange={(e) => setNewDocTitle(e.target.value)}
+                        aria-required="true"
+                      />
+                    </div>
+                    <div
+                      className={`grid gap-3 ${activeTab === 'approved' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="new-doc-issue">Issue *</Label>
+                        <Input
+                          id="new-doc-issue"
+                          placeholder="e.g. 1"
+                          value={newDocIssueNumber}
+                          onChange={(e) => setNewDocIssueNumber(e.target.value)}
+                          aria-required="true"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="new-doc-revision">Revision *</Label>
+                        <Input
+                          id="new-doc-revision"
+                          placeholder="e.g. 0"
+                          value={newDocRevisionNumber}
+                          onChange={(e) => setNewDocRevisionNumber(e.target.value)}
+                          aria-required="true"
+                        />
+                      </div>
+                      {activeTab === 'approved' && (
+                        <div className="space-y-2 sm:col-span-1">
+                          <Label htmlFor="new-doc-copy-number">Copy # *</Label>
+                          <Input
+                            id="new-doc-copy-number"
+                            placeholder="e.g. 01"
+                            value={newDocCopyNumber}
+                            onChange={(e) => setNewDocCopyNumber(e.target.value)}
+                            aria-required="true"
+                            aria-label="Manual copy number for approved document"
+                          />
+                          <p className="text-xs text-muted-foreground leading-snug">
+                            First controlled copy for this manual.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-foreground">File</p>
+                    <Label htmlFor="new-doc-file" className="sr-only">
+                      File Word or PDF required
+                    </Label>
+                    <Input
+                      id="new-doc-file"
+                      type="file"
+                      accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+                      onChange={(e) => setNewDocFile(e.target.files?.[0] ?? null)}
+                      aria-required="true"
+                    />
+                    {newDocFile ? (
+                      <p className="text-xs text-muted-foreground truncate" title={newDocFile.name}>
+                        Selected: {newDocFile.name}
+                      </p>
                     ) : (
-                      users.map((u) => {
-                        const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || u.id
-                        const checked = newDocManualHolderIds.includes(u.id)
+                      <p className="text-xs text-muted-foreground">Word or PDF *</p>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-foreground">Manual custodian roles *</p>
+                    <p className="text-xs text-muted-foreground">
+                      Users with any selected role can open or edit Under Review / Masters.
+                    </p>
+                    <div className="max-h-[min(200px,28vh)] overflow-y-auto rounded-md border bg-background p-2 space-y-1">
+                      {CUSTODIAN_ROLE_OPTIONS.map((opt) => {
+                        const checked = newDocCustodianRoles.includes(opt.value)
                         return (
                           <label
-                            key={u.id}
-                            className="flex items-center gap-2 py-0.5 px-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                            key={opt.value}
+                            className="flex items-center gap-2 py-1 px-1.5 rounded-md hover:bg-muted/60 cursor-pointer text-sm"
                           >
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => {
-                                setNewDocManualHolderIds((prev) =>
-                                  prev.includes(u.id)
-                                    ? prev.filter((id) => id !== u.id)
-                                    : [...prev, u.id]
+                                setNewDocCustodianRoles((prev) =>
+                                  prev.includes(opt.value)
+                                    ? prev.filter((r) => r !== opt.value)
+                                    : [...prev, opt.value]
                                 )
                               }}
                               className="h-3.5 w-3.5 rounded border-input shrink-0"
-                              aria-label={`Select ${name} as manual holder`}
+                              aria-label={`Select ${opt.label} as manual custodian role`}
                             />
-                            <span className="truncate">{name}</span>
+                            <span>{opt.label}</span>
                           </label>
                         )
-                      })
+                      })}
+                    </div>
+                    {newDocCustodianRoles.length > 0 && (
+                      <p className="text-xs text-muted-foreground">{newDocCustodianRoles.length} selected</p>
                     )}
                   </div>
-                  {newDocManualHolderIds.length > 0 && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{newDocManualHolderIds.length} selected</p>
-                  )}
-                </div>
-                {activeTab === 'approved' && (
-                  <div>
-                    <Label>Departments</Label>
-                    <p className="text-xs text-muted-foreground mb-1">
-                      Optional – notify these departments.
-                    </p>
-                    <div className="mt-1 border rounded-md p-2 max-h-32 overflow-y-auto bg-muted/30 space-y-1.5">
-                      {departments.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Loading…</p>
-                      ) : (
-                        departments.map((d) => {
-                          const checked = newDocDepartmentIds.includes(d.id)
-                          return (
-                            <label
-                              key={d.id}
-                              className="flex items-center gap-2 py-0.5 px-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => {
-                                  setNewDocDepartmentIds((prev) =>
-                                    prev.includes(d.id)
-                                      ? prev.filter((id) => id !== d.id)
-                                      : [...prev, d.id]
-                                  )
-                                }}
-                                className="h-3.5 w-3.5 rounded border-input shrink-0"
-                                aria-label={`Select department ${d.name}`}
-                              />
-                              <span className="truncate">{d.name}</span>
-                            </label>
-                          )
-                        })
+                  {activeTab === 'approved' && (
+                    <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+                      <p className="text-sm font-semibold text-foreground">Departments (optional)</p>
+                      <p className="text-xs text-muted-foreground">Notify selected departments.</p>
+                      <div className="max-h-[min(160px,22vh)] overflow-y-auto rounded-md border bg-background p-2 space-y-1">
+                        {departments.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-1">Loading…</p>
+                        ) : (
+                          departments.map((d) => {
+                            const checked = newDocDepartmentIds.includes(d.id)
+                            return (
+                              <label
+                                key={d.id}
+                                className="flex items-center gap-2 py-1 px-1.5 rounded-md hover:bg-muted/60 cursor-pointer text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setNewDocDepartmentIds((prev) =>
+                                      prev.includes(d.id)
+                                        ? prev.filter((id) => id !== d.id)
+                                        : [...prev, d.id]
+                                    )
+                                  }}
+                                  className="h-3.5 w-3.5 rounded border-input shrink-0"
+                                  aria-label={`Select department ${d.name}`}
+                                />
+                                <span className="truncate">{d.name}</span>
+                              </label>
+                            )
+                          })
+                        )}
+                      </div>
+                      {newDocDepartmentIds.length > 0 && (
+                        <p className="text-xs text-muted-foreground">{newDocDepartmentIds.length} selected</p>
                       )}
                     </div>
-                    {newDocDepartmentIds.length > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5">{newDocDepartmentIds.length} selected</p>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-                <div className="flex-1 min-w-0">
-                  <Label htmlFor="new-doc-file">File (Word or PDF) *</Label>
-                  <Input
-                    id="new-doc-file"
-                    type="file"
-                    accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
-                    className="mt-1"
-                    onChange={(e) => setNewDocFile(e.target.files?.[0] ?? null)}
-                    aria-required="true"
-                  />
+                  )}
                 </div>
-                {newDocFile && (
-                  <p className="text-sm text-muted-foreground truncate sm:mb-1" title={newDocFile.name}>
-                    {newDocFile.name}
-                  </p>
-                )}
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t border-border pt-4 mt-2">
               <Button variant="outline" onClick={() => setUploadDocOpen(false)}>
                 Cancel
               </Button>
@@ -895,9 +958,10 @@ const DocumentsPage = () => {
                   !newDocTitle.trim() ||
                   !newDocIssueNumber.trim() ||
                   !newDocRevisionNumber.trim() ||
-                  newDocManualHolderIds.length === 0 ||
+                  newDocCustodianRoles.length === 0 ||
                   !newDocFile ||
-                  newDocPending
+                  newDocPending ||
+                  (activeTab === 'approved' && !newDocCopyNumber.trim())
                 }
               >
                 {newDocPending ? 'Uploading…' : 'Upload Document'}

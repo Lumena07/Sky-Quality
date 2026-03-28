@@ -19,10 +19,21 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PdfPageStrip } from '@/components/documents/pdf-page-strip'
-import { hasReviewerRole } from '@/lib/permissions'
+import { hasReviewerRole, parseJsonStringArray } from '@/lib/permissions'
+import { formatDate } from '@/lib/utils'
 
 const isPdf = (doc: any) =>
   doc?.fileType === 'application/pdf' || /\.pdf$/i.test(doc?.fileUrl || '')
+
+const CUSTODIAN_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'QUALITY_MANAGER', label: 'Quality Manager' },
+  { value: 'AUDITOR', label: 'Auditor' },
+  { value: 'ACCOUNTABLE_MANAGER', label: 'Accountable Manager' },
+  { value: 'DEPARTMENT_HEAD', label: 'Department Head' },
+  { value: 'STAFF', label: 'Staff' },
+  { value: 'SYSTEM_ADMIN', label: 'System Admin' },
+  { value: 'FOCAL_PERSON', label: 'Focal Person' },
+]
 
 const DocumentViewPage = () => {
   const params = useParams()
@@ -64,6 +75,20 @@ const DocumentViewPage = () => {
   const [editActionPending, setEditActionPending] = useState(false)
   const [pendingAdds, setPendingAdds] = useState<Array<{ files: File[]; insertAt: number }>>([])
 
+  const [manualCopies, setManualCopies] = useState<
+    Array<{ id: string; copyNumber: string; assignedToUserId: string | null; notes: string | null; createdAt: string }>
+  >([])
+  const [copiesLoading, setCopiesLoading] = useState(false)
+  const [copyNumberInput, setCopyNumberInput] = useState('')
+  const [copyNotesInput, setCopyNotesInput] = useState('')
+  const [copySaving, setCopySaving] = useState(false)
+  const [editingCopyId, setEditingCopyId] = useState<string | null>(null)
+  const [editCopyNumber, setEditCopyNumber] = useState('')
+  const [editCopyNotes, setEditCopyNotes] = useState('')
+  const [copyEditSaving, setCopyEditSaving] = useState(false)
+  const [editCustodianRoles, setEditCustodianRoles] = useState<string[]>([])
+  const [custodianRolesSaving, setCustodianRolesSaving] = useState(false)
+
   const fetchDocument = async () => {
     if (!id) return
     setLoading(true)
@@ -77,7 +102,7 @@ const DocumentViewPage = () => {
         setDocument(null)
         if (res.status === 403) {
           const body = await res.json().catch(() => ({}))
-          setAccessError((body as { error?: string }).error ?? 'Only manual holders can open this document.')
+          setAccessError((body as { error?: string }).error ?? 'Only manual custodians can open this document.')
         }
       }
     } catch {
@@ -90,6 +115,35 @@ const DocumentViewPage = () => {
   useEffect(() => {
     fetchDocument()
   }, [id])
+
+  useEffect(() => {
+    if (!document) return
+    setEditCustodianRoles(parseJsonStringArray(document.manualCustodianRoles))
+  }, [document?.id, document?.manualCustodianRoles])
+
+  const fetchManualCopies = async () => {
+    if (!id || !hasReviewerRole(userRoles)) return
+    setCopiesLoading(true)
+    try {
+      const res = await fetch(`/api/documents/${id}/manual-copies`, { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        setManualCopies(Array.isArray(data) ? data : [])
+      } else {
+        setManualCopies([])
+      }
+    } catch {
+      setManualCopies([])
+    } finally {
+      setCopiesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (document && hasReviewerRole(userRoles)) {
+      fetchManualCopies()
+    }
+  }, [document?.id, userRoles.join(',')])
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -712,6 +766,298 @@ const DocumentViewPage = () => {
               <p className="text-muted-foreground">
                 Use “Open in Word” to view or “Upload new version” to update this document.
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasReviewerRole(userRoles) && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Manual custodian (roles)</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Users with any selected role can open this manual when it is under review or in masters. At least one role
+                is required.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="border rounded-md p-2 max-h-40 overflow-y-auto bg-muted/30 space-y-1.5">
+                {CUSTODIAN_ROLE_OPTIONS.map((opt) => {
+                  const checked = editCustodianRoles.includes(opt.value)
+                  return (
+                    <label
+                      key={opt.value}
+                      className="flex items-center gap-2 py-0.5 px-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setEditCustodianRoles((prev) =>
+                            prev.includes(opt.value)
+                              ? prev.filter((r) => r !== opt.value)
+                              : [...prev, opt.value]
+                          )
+                        }}
+                        className="h-3.5 w-3.5 rounded border-input shrink-0"
+                        aria-label={`Select ${opt.label} as manual custodian role`}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <Button
+                type="button"
+                disabled={custodianRolesSaving || editCustodianRoles.length === 0}
+                onClick={async () => {
+                  if (!id || editCustodianRoles.length === 0) return
+                  setCustodianRolesSaving(true)
+                  try {
+                    const res = await fetch(`/api/documents/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ manualCustodianRoles: editCustodianRoles }),
+                    })
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}))
+                      alert((err as { error?: string }).error ?? 'Failed to save custodian roles')
+                      return
+                    }
+                    const data = await res.json()
+                    setDocument(data)
+                  } finally {
+                    setCustodianRolesSaving(false)
+                  }
+                }}
+                aria-label="Save manual custodian roles"
+              >
+                {custodianRolesSaving ? 'Saving…' : 'Save custodian roles'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasReviewerRole(userRoles) && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Manual copy numbers</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Track controlled copy numbers for this manual (Quality Manager / Auditor).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2 items-end">
+                <div className="space-y-1">
+                  <Label htmlFor="copy-num">Copy number</Label>
+                  <Input
+                    id="copy-num"
+                    value={copyNumberInput}
+                    onChange={(e) => setCopyNumberInput(e.target.value)}
+                    placeholder="e.g. 01"
+                    className="w-40"
+                    aria-label="Copy number"
+                  />
+                </div>
+                <div className="space-y-1 flex-1 min-w-[200px]">
+                  <Label htmlFor="copy-notes">Notes (optional)</Label>
+                  <Input
+                    id="copy-notes"
+                    value={copyNotesInput}
+                    onChange={(e) => setCopyNotesInput(e.target.value)}
+                    placeholder="Location or holder"
+                    aria-label="Copy notes"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  disabled={copySaving || !copyNumberInput.trim()}
+                  onClick={async () => {
+                    if (!id || !copyNumberInput.trim()) return
+                    setCopySaving(true)
+                    try {
+                      const res = await fetch(`/api/documents/${id}/manual-copies`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                          copyNumber: copyNumberInput.trim(),
+                          notes: copyNotesInput.trim() || null,
+                        }),
+                      })
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}))
+                        alert((err as { error?: string }).error ?? 'Failed to add copy')
+                        return
+                      }
+                      setCopyNumberInput('')
+                      setCopyNotesInput('')
+                      fetchManualCopies()
+                    } finally {
+                      setCopySaving(false)
+                    }
+                  }}
+                  aria-label="Add manual copy record"
+                >
+                  {copySaving ? 'Saving…' : 'Add copy'}
+                </Button>
+              </div>
+              {copiesLoading ? (
+                <p className="text-sm text-muted-foreground">Loading copies…</p>
+              ) : manualCopies.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No copy records yet.</p>
+              ) : (
+                <div className="border rounded-md overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Copy #</th>
+                        <th className="text-left p-2 font-medium">Notes</th>
+                        <th className="text-left p-2 font-medium">Created</th>
+                        <th className="text-right p-2 font-medium w-36">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {manualCopies.map((c) => {
+                        const isEditing = editingCopyId === c.id
+                        return (
+                          <tr key={c.id} className="border-t">
+                            <td className="p-2 font-medium align-top">
+                              {isEditing ? (
+                                <Input
+                                  value={editCopyNumber}
+                                  onChange={(e) => setEditCopyNumber(e.target.value)}
+                                  className="h-8 max-w-[140px]"
+                                  aria-label="Edit copy number"
+                                />
+                              ) : (
+                                c.copyNumber
+                              )}
+                            </td>
+                            <td className="p-2 text-muted-foreground align-top">
+                              {isEditing ? (
+                                <Input
+                                  value={editCopyNotes}
+                                  onChange={(e) => setEditCopyNotes(e.target.value)}
+                                  className="h-8 max-w-xs"
+                                  placeholder="Optional"
+                                  aria-label="Edit copy notes"
+                                />
+                              ) : (
+                                (c.notes ?? '—')
+                              )}
+                            </td>
+                            <td className="p-2 text-muted-foreground align-top">
+                              {c.createdAt ? formatDate(c.createdAt) : '—'}
+                            </td>
+                            <td className="p-2 text-right align-top">
+                              <div className="flex flex-wrap justify-end gap-1">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      disabled={copyEditSaving || !editCopyNumber.trim()}
+                                      onClick={async () => {
+                                        if (!id || !editCopyNumber.trim()) return
+                                        setCopyEditSaving(true)
+                                        try {
+                                          const res = await fetch(`/api/documents/${id}/manual-copies/${c.id}`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            credentials: 'include',
+                                            body: JSON.stringify({
+                                              copyNumber: editCopyNumber.trim(),
+                                              notes: editCopyNotes.trim() || null,
+                                            }),
+                                          })
+                                          if (!res.ok) {
+                                            const err = await res.json().catch(() => ({}))
+                                            const msg = (err as { error?: string }).error ?? 'Failed to update'
+                                            const dup = /unique|duplicate|already exists|23505/i.test(
+                                              `${msg} ${JSON.stringify(err)}`
+                                            )
+                                            alert(
+                                              dup
+                                                ? 'That copy number already exists for this document.'
+                                                : msg
+                                            )
+                                            return
+                                          }
+                                          setEditingCopyId(null)
+                                          fetchManualCopies()
+                                        } finally {
+                                          setCopyEditSaving(false)
+                                        }
+                                      }}
+                                      aria-label="Save copy row"
+                                    >
+                                      {copyEditSaving ? 'Saving…' : 'Save'}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={copyEditSaving}
+                                      onClick={() => {
+                                        setEditingCopyId(null)
+                                      }}
+                                      aria-label="Cancel editing copy"
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={editingCopyId !== null}
+                                      onClick={() => {
+                                        setEditingCopyId(c.id)
+                                        setEditCopyNumber(c.copyNumber)
+                                        setEditCopyNotes(c.notes ?? '')
+                                      }}
+                                      aria-label={`Edit copy ${c.copyNumber}`}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-destructive"
+                                      disabled={editingCopyId !== null}
+                                      onClick={async () => {
+                                        if (!confirm('Remove this copy record?')) return
+                                        const res = await fetch(`/api/documents/${id}/manual-copies/${c.id}`, {
+                                          method: 'DELETE',
+                                          credentials: 'include',
+                                        })
+                                        if (!res.ok) {
+                                          const err = await res.json().catch(() => ({}))
+                                          alert((err as { error?: string }).error ?? 'Failed to delete')
+                                          return
+                                        }
+                                        fetchManualCopies()
+                                      }}
+                                      aria-label={`Delete copy ${c.copyNumber}`}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

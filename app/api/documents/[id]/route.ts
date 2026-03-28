@@ -2,7 +2,14 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { createActivityLog } from '@/lib/activity-log'
-import { getCurrentUserProfile, canEditDocument, isNormalUser, canSeeAmDashboard, hasReviewerRole } from '@/lib/permissions'
+import {
+  getCurrentUserProfile,
+  canEditDocument,
+  isNormalUser,
+  canSeeAmDashboard,
+  hasReviewerRole,
+  isDocumentCustodian,
+} from '@/lib/permissions'
 
 export async function GET(
   request: Request,
@@ -37,32 +44,38 @@ export async function GET(
     }
 
     const status = document.status as string
-    const manualHolderIds = (document as { manualHolderIds?: string[] }).manualHolderIds ?? []
-    const departmentIds = (document as { departmentIds?: string[] }).departmentIds ?? []
+    const docRow = document as {
+      manualHolderIds?: unknown
+      manualCustodianRoles?: unknown
+      departmentIds?: string[]
+    }
+    const departmentIds = docRow.departmentIds ?? []
     const isReviewOrDraft = status === 'REVIEW' || status === 'DRAFT'
-    const isManualHolder =
-      Array.isArray(manualHolderIds) && manualHolderIds.includes(user.id)
     const { roles, departmentId: userDepartmentId } = await getCurrentUserProfile(supabase, user.id)
+    const isCustodian = isDocumentCustodian(user.id, roles, docRow)
     const isApprovedForMyDept =
       status === 'APPROVED' &&
       userDepartmentId &&
       Array.isArray(departmentIds) &&
       departmentIds.includes(userDepartmentId)
     const canOpen =
-      isManualHolder ||
+      isCustodian ||
       isApprovedForMyDept ||
-      canEditDocument(isReviewOrDraft, isManualHolder, roles) ||
+      canEditDocument(isReviewOrDraft, isCustodian, roles) ||
       canSeeAmDashboard(roles)
 
-    if (isNormalUser(roles) && !canSeeAmDashboard(roles) && !isApprovedForMyDept && !isManualHolder) {
+    if (isNormalUser(roles) && !canSeeAmDashboard(roles) && !isApprovedForMyDept && !isCustodian) {
       return NextResponse.json(
-        { error: 'You can only view approved documents for your department or documents you are a manual holder of' },
+        {
+          error:
+            'You can only view approved documents for your department or documents you are a manual custodian of',
+        },
         { status: 403 }
       )
     }
     if (isReviewOrDraft && !canOpen) {
       return NextResponse.json(
-        { error: 'Only manual holders, or auditors/quality managers, can open this document' },
+        { error: 'Only manual custodians, or auditors/quality managers, can open this document' },
         { status: 403 }
       )
     }
@@ -101,7 +114,93 @@ export async function PATCH(
 
     const { id } = await params
     const body = await request.json()
-    const { fileUrl, fileType, fileSize, changeLog } = body
+    const { fileUrl, fileType, fileSize, changeLog, manualCustodianRoles, manualHolderIds } = body
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('Document')
+      .select('id, version, status, manualHolderIds, manualCustodianRoles')
+      .eq('id', id)
+      .single()
+
+    if (fetchError || !existing) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+
+    const existingRow = existing as {
+      status?: string
+      manualHolderIds?: unknown
+      manualCustodianRoles?: unknown
+      version?: string
+    }
+    const docStatus = existingRow.status
+    const isReviewOrDraft = docStatus === 'REVIEW' || docStatus === 'DRAFT'
+    const { roles } = await getCurrentUserProfile(supabase, user.id)
+    const isCustodian = isDocumentCustodian(user.id, roles, existingRow)
+
+    const metadataOnly =
+      !fileUrl &&
+      (manualCustodianRoles !== undefined || manualHolderIds !== undefined)
+
+    if (metadataOnly) {
+      if (!hasReviewerRole(roles)) {
+        return NextResponse.json(
+          { error: 'Only Quality Manager or auditors can update custodian settings.' },
+          { status: 403 }
+        )
+      }
+      const custodianRoles =
+        manualCustodianRoles !== undefined
+          ? Array.isArray(manualCustodianRoles)
+            ? manualCustodianRoles.filter(
+                (x: unknown) => typeof x === 'string' && x.trim().length > 0
+              )
+            : []
+          : undefined
+      if (custodianRoles !== undefined && custodianRoles.length === 0) {
+        return NextResponse.json(
+          { error: 'At least one manual custodian role is required' },
+          { status: 400 }
+        )
+      }
+      const holders =
+        manualHolderIds !== undefined
+          ? Array.isArray(manualHolderIds)
+            ? manualHolderIds.filter((x: unknown) => typeof x === 'string')
+            : []
+          : undefined
+
+      const updatePayload: Record<string, unknown> = {
+        updatedAt: new Date().toISOString(),
+      }
+      if (custodianRoles !== undefined) updatePayload.manualCustodianRoles = custodianRoles
+      if (holders !== undefined) updatePayload.manualHolderIds = holders
+
+      const { data: doc, error: updateError } = await supabase
+        .from('Document')
+        .update(updatePayload)
+        .eq('id', id)
+        .select('*')
+        .single()
+
+      if (updateError || !doc) {
+        console.error('Error updating document custodians:', updateError)
+        return NextResponse.json(
+          { error: 'Failed to update document' },
+          { status: 500 }
+        )
+      }
+
+      await createActivityLog({
+        userId: user.id,
+        action: 'UPDATE',
+        entityType: 'Document',
+        entityId: id,
+        details: 'Manual custodian settings updated',
+        documentId: id,
+      })
+
+      return NextResponse.json(doc)
+    }
 
     if (!fileUrl || !fileType || fileSize == null) {
       return NextResponse.json(
@@ -110,22 +209,6 @@ export async function PATCH(
       )
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from('Document')
-      .select('id, version, status, manualHolderIds')
-      .eq('id', id)
-      .single()
-
-    if (fetchError || !existing) {
-      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    }
-
-    const docStatus = (existing as { status?: string }).status
-    const manualHolderIds = (existing as { manualHolderIds?: string[] }).manualHolderIds ?? []
-    const isReviewOrDraft = docStatus === 'REVIEW' || docStatus === 'DRAFT'
-    const isManualHolder =
-      Array.isArray(manualHolderIds) && manualHolderIds.includes(user.id)
-    const { roles } = await getCurrentUserProfile(supabase, user.id)
     if (docStatus === 'APPROVED') {
       if (!hasReviewerRole(roles)) {
         return NextResponse.json(
@@ -134,16 +217,16 @@ export async function PATCH(
         )
       }
     } else {
-      const canEdit = canEditDocument(isReviewOrDraft, isManualHolder, roles)
+      const canEdit = canEditDocument(isReviewOrDraft, isCustodian, roles)
       if (isReviewOrDraft && !canEdit) {
         return NextResponse.json(
-          { error: 'Only manual holders, or auditors/quality managers, can edit this document' },
+          { error: 'Only manual custodians, or auditors/quality managers, can edit this document' },
           { status: 403 }
         )
       }
     }
 
-    const newVersion = incrementVersion(existing.version)
+    const newVersion = incrementVersion(String(existingRow.version ?? '1.0'))
 
     const { data: doc, error: updateError } = await supabase
       .from('Document')

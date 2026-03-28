@@ -16,6 +16,10 @@ const ALLOWED_ENTITY_TYPES = [
   'sms-hazard',
   'sms-capa',
   'sms-investigation',
+  'regulatory-library',
+  'sla',
+  'training-compliance-document',
+  'training',
 ]
 const ALLOWED_FILE_TYPES = [
   'image/jpeg',

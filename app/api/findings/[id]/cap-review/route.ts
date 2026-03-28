@@ -2,7 +2,11 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { getCurrentUserRoles, canReviewFinding, canReviewFindingForAudit } from '@/lib/permissions'
-import { capRequiresAccountableManager } from '@/lib/cap-resources'
+import {
+  auditTypeSkipsCapResourceAccountableManager,
+  capRequiresAccountableManager,
+} from '@/lib/cap-resources'
+import { isObservationPriority } from '@/lib/audit-deadlines'
 
 /** Approve or reject Corrective Action Plan (CAP). Rejection sends back to responsible person. */
 export async function PATCH(
@@ -32,13 +36,23 @@ export async function PATCH(
 
     const { data: findingRow, error: findingErr } = await supabase
       .from('Finding')
-      .select('auditId')
+      .select('auditId, priority')
       .eq('id', findingId)
       .single()
     if (findingErr || !findingRow) {
       return NextResponse.json({ error: 'Finding not found' }, { status: 404 })
     }
+    if (isObservationPriority((findingRow as { priority?: string | null }).priority)) {
+      return NextResponse.json(
+        { error: 'Observation findings do not use CAP review in the system' },
+        { status: 400 }
+      )
+    }
     const auditId = (findingRow as { auditId: string }).auditId
+    const { data: auditRow } = await supabase.from('Audit').select('type').eq('id', auditId).single()
+    const skipAmCapResources = auditTypeSkipsCapResourceAccountableManager(
+      (auditRow as { type?: string } | null)?.type
+    )
     const canReview = await canReviewFindingForAudit(supabase, user.id, auditId, roles)
     if (!canReview) {
       return NextResponse.json(
@@ -73,7 +87,10 @@ export async function PATCH(
     }
 
     const resourceTypes = (ca as { capResourceTypes?: string[] | null }).capResourceTypes ?? []
-    const needsAm = approved && capRequiresAccountableManager(resourceTypes)
+    const needsAm =
+      approved &&
+      !skipAmCapResources &&
+      capRequiresAccountableManager(resourceTypes)
 
     const now = new Date().toISOString()
     const status = approved ? 'APPROVED' : 'REJECTED'
@@ -84,7 +101,13 @@ export async function PATCH(
       capRejectionReason: approved ? null : rejectionReason,
       updatedAt: now,
     }
-    if (approved && needsAm) {
+    if (approved && skipAmCapResources) {
+      updatePayload.capResourceTypes = ['NONE']
+      updatePayload.amCapStatus = 'NOT_REQUIRED'
+      updatePayload.amCapReviewedById = null
+      updatePayload.amCapReviewedAt = null
+      updatePayload.amCapRejectionReason = null
+    } else if (approved && needsAm) {
       updatePayload.amCapStatus = 'PENDING'
     } else if (approved && !needsAm) {
       updatePayload.amCapStatus = 'NOT_REQUIRED'

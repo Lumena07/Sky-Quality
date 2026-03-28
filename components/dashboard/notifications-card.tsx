@@ -16,6 +16,7 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   TRAINING_EXPIRY: 'Training expiry',
   SYSTEM_ALERT: 'System alert',
   ESCALATION_TO_AM: 'Escalation to AM',
+  TCAA_P1_CLOSEOUT_RED_ALERT: 'TCAA red alert (P1)',
 }
 
 type NotificationRow = {
@@ -86,12 +87,29 @@ export const NotificationsCard = () => {
             {notifications.map((n) => (
               <li
                 key={n.id}
-                className="flex items-start justify-between gap-2 rounded-lg border p-2 text-sm bg-muted/50"
+                className={
+                  n.type === 'TCAA_P1_CLOSEOUT_RED_ALERT'
+                    ? 'flex items-start justify-between gap-2 rounded-lg border-2 border-destructive/80 bg-destructive/10 p-2 text-sm'
+                    : 'flex items-start justify-between gap-2 rounded-lg border p-2 text-sm bg-muted/50'
+                }
               >
                 <div className="min-w-0 flex-1">
-                  <span className="font-medium">{n.title}</span>
-                  <p className="text-muted-foreground text-xs mt-0.5">{n.message}</p>
-                  <Badge variant="secondary" className="mt-1 text-[10px]">
+                  <span className={n.type === 'TCAA_P1_CLOSEOUT_RED_ALERT' ? 'font-semibold text-destructive' : 'font-medium'}>
+                    {n.title}
+                  </span>
+                  <p
+                    className={
+                      n.type === 'TCAA_P1_CLOSEOUT_RED_ALERT'
+                        ? 'text-destructive/90 text-xs mt-0.5'
+                        : 'text-muted-foreground text-xs mt-0.5'
+                    }
+                  >
+                    {n.message}
+                  </p>
+                  <Badge
+                    variant={n.type === 'TCAA_P1_CLOSEOUT_RED_ALERT' ? 'destructive' : 'secondary'}
+                    className="mt-1 text-[10px]"
+                  >
                     {NOTIFICATION_TYPE_LABELS[n.type] ?? n.type}
                   </Badge>
                 </div>

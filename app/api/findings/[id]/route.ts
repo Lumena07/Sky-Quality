@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
-import { getCurrentUserProfile, isNormalUser, canSeeAmDashboard, canCreateFinding, canReviewFindingForAudit } from '@/lib/permissions'
+import {
+  getCurrentUserProfile,
+  isNormalUser,
+  canSeeAmDashboard,
+  canCreateFinding,
+  canReviewFindingForAudit,
+  isAccountableManager,
+} from '@/lib/permissions'
+import {
+  auditTypeSkipsCapResourceAccountableManager,
+  capRequiresAccountableManager,
+} from '@/lib/cap-resources'
+import { calculateDeadlines, isObservationPriority } from '@/lib/audit-deadlines'
 
 export async function GET(
   _request: Request,
@@ -83,11 +95,30 @@ export async function GET(
         ? await canReviewFindingForAudit(supabase, user.id, auditId, roles)
         : false
 
+    const caList = Array.isArray(correctiveActionData) ? correctiveActionData : [correctiveActionData]
+    const caFirst = caList[0] as
+      | { capStatus?: string; capResourceTypes?: string[] | null; amCapStatus?: string | null }
+      | undefined
+    const auditRel =
+      (finding as { Audit?: { type?: string } | null }).Audit ??
+      (finding as { audit?: { type?: string } | null }).audit
+    const amAuditType = auditRel?.type ?? null
+    const skipAmGate = auditTypeSkipsCapResourceAccountableManager(amAuditType)
+    const needsAmCap =
+      Boolean(caFirst) && !skipAmGate && capRequiresAccountableManager(caFirst?.capResourceTypes ?? null)
+    const canReviewAmCap =
+      isAccountableManager(roles) &&
+      Boolean(caFirst) &&
+      caFirst?.capStatus === 'APPROVED' &&
+      needsAmCap &&
+      caFirst?.amCapStatus === 'PENDING'
+
     const response = {
       ...finding,
       attachments: attachmentRows ?? [],
-      CorrectiveAction: Array.isArray(correctiveActionData) ? correctiveActionData : [correctiveActionData],
+      CorrectiveAction: caList,
       canReviewCapCat,
+      canReviewAmCap,
     }
 
     return NextResponse.json(response)
@@ -120,7 +151,7 @@ export async function PATCH(
     const { roles } = await getCurrentUserProfile(supabase, user.id)
     const { data: existing } = await supabase
       .from('Finding')
-      .select('assignedToId, status')
+      .select('assignedToId, status, auditId')
       .eq('id', id)
       .single()
 
@@ -134,9 +165,42 @@ export async function PATCH(
     if (canCreateFinding(roles)) {
       if (body.departmentId !== undefined) updates.departmentId = body.departmentId
       if (body.description !== undefined) updates.description = body.description
-      if (body.priority !== undefined) updates.priority = body.priority
       if (body.assignedToId !== undefined) updates.assignedToId = body.assignedToId
       if (body.classificationId !== undefined) updates.classificationId = body.classificationId || null
+      if (body.priority !== undefined) {
+        const newPri = String(body.priority).toUpperCase()
+        if (!['P1', 'P2', 'P3', 'OBSERVATION'].includes(newPri)) {
+          return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
+        }
+        updates.priority = newPri
+        const auditId = (existing as { auditId?: string }).auditId
+        if (auditId) {
+          const { data: auditRow } = await supabase
+            .from('Audit')
+            .select('createdAt, updatedAt')
+            .eq('id', auditId)
+            .single()
+          const reportDate = auditRow
+            ? new Date(
+                (auditRow as { updatedAt?: string; createdAt?: string }).updatedAt ||
+                  (auditRow as { createdAt?: string }).createdAt ||
+                  Date.now()
+              )
+            : new Date()
+          if (isObservationPriority(newPri)) {
+            updates.capDueDate = null
+            updates.closeOutDueDate = null
+            updates.dueDate = null
+            updates.severity = 'Observation'
+          } else {
+            const d = calculateDeadlines(reportDate, newPri as 'P1' | 'P2' | 'P3')
+            updates.capDueDate = d.capDueDate.toISOString()
+            updates.closeOutDueDate = d.closeOutDueDate.toISOString()
+            updates.severity =
+              newPri === 'P1' ? 'Critical' : newPri === 'P2' ? 'Major' : 'Minor'
+          }
+        }
+      }
     }
 
     const rootCause = typeof body.rootCause === 'string' ? body.rootCause.trim() : null

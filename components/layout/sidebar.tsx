@@ -31,6 +31,10 @@ import {
   Users,
   Layers,
   ChevronDown,
+  Scale,
+  Building2,
+  ClipboardCheck,
+  BellRing,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSidebarRoles } from '@/components/providers/sidebar-roles-provider'
@@ -46,6 +50,10 @@ import {
   canSeeQualityTeamRegister,
   canViewAuditPlan,
   canViewActivityLog,
+  canSeeRegulatoryLibrary,
+  canSeeExternalServiceProviders,
+  canAccessTrainingCompliancePage,
+  canSeeTcaaMandatoryNotification,
 } from '@/lib/permissions'
 
 const amDashboardItem = { href: '/dashboard/am', label: 'AM Dashboard', icon: Shield }
@@ -84,8 +92,12 @@ const allMenuItems: MenuLinkItem[] = [
   { href: '/audits', label: 'Audits', icon: Calendar },
   { href: '/findings', label: 'Findings & CAP', icon: AlertCircle },
   { href: '/checklists', label: 'Checklists', icon: ClipboardList },
+  { href: '/tcaa-mandatory-notification', label: 'TCAA mandatory notification', icon: BellRing },
   { href: '/documents', label: 'Documents', icon: FileText },
-  { href: '/training', label: 'Training & Qualification', icon: BookOpen },
+  { href: '/regulatory-library', label: 'Regulatory Library', icon: Scale },
+  { href: '/external-service-providers', label: 'External Service Providers', icon: Building2 },
+  { href: '/training', label: 'QMS personnel training & qualification', icon: BookOpen },
+  { href: '/training-compliance', label: 'Training Compliance', icon: ClipboardCheck },
   { ...amDashboardItem },
   { href: '/dashboard/performance', label: 'Performance', icon: TrendingUp },
   { href: '/sms/risk/report', label: 'Report Hazard / Occurrence', icon: Siren },
@@ -133,8 +145,19 @@ const getFilteredFlatMenu = (
   roles: string[] | null,
   departmentId: string | null
 ): MenuLinkItem[] => {
+  const trainingComplianceVisible =
+    roles != null && canAccessTrainingCompliancePage(roles, departmentId)
   const normalUserItems = allMenuItems.filter((item) =>
-    ['/dashboard', '/findings', '/documents', '/training', '/quality-policy'].includes(item.href)
+    [
+      '/dashboard',
+      '/findings',
+      '/documents',
+      '/training',
+      '/quality-policy',
+      '/regulatory-library',
+      '/external-service-providers',
+      '/training-compliance',
+    ].includes(item.href)
   )
   const focalPersonItems = allMenuItems.filter((item) =>
     ['/dashboard', '/findings'].includes(item.href)
@@ -169,6 +192,11 @@ const getFilteredFlatMenu = (
     if (item.href === '/activity-log') return canViewActivityLog(roles ?? [])
     if (item.href === '/quality-team') return canSeeQualityTeamRegister(roles ?? [])
     if (item.href === '/training') return canSeeTraining(roles ?? [], departmentId)
+    if (item.href === '/regulatory-library') return canSeeRegulatoryLibrary(roles ?? [])
+    if (item.href === '/external-service-providers')
+      return canSeeExternalServiceProviders(roles ?? [], departmentId)
+    if (item.href === '/training-compliance') return trainingComplianceVisible
+    if (item.href === '/tcaa-mandatory-notification') return canSeeTcaaMandatoryNotification(roles ?? [])
     return true
   })
 }

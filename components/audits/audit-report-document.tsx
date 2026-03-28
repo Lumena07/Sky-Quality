@@ -30,6 +30,7 @@ const getPriorityBadgeClass = (priority: string | null | undefined): string => {
   if (p === 'P1') return 'report-badge report-badge-p1'
   if (p === 'P2') return 'report-badge report-badge-p2'
   if (p === 'P3') return 'report-badge report-badge-p3'
+  if (p === 'OBSERVATION') return 'report-badge report-badge-neutral'
   return 'report-badge report-badge-priority'
 }
 

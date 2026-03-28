@@ -1,6 +1,7 @@
 export type OverdueKind = 'NONE' | 'CAP' | 'CAT' | 'FINDING_DUE'
 
 export type OverdueInput = {
+  findingPriority?: string | null
   findingStatus?: string | null
   findingDueDate?: string | null
   findingCapDueDate?: string | null
@@ -65,6 +66,9 @@ export const evaluateOverdue = (
   input: OverdueInput,
   nowIso = new Date().toISOString()
 ): OverdueEval => {
+  if (String(input.findingPriority ?? '').toUpperCase() === 'OBSERVATION') {
+    return { isOverdue: false, kind: 'NONE' }
+  }
   if (isCatOverdue(input, nowIso)) {
     return { isOverdue: true, kind: 'CAT' }
   }
